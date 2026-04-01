@@ -48,6 +48,8 @@ setup(
             "oic>=1.4.0",
             "selenium-wire>=5.1.0",
             "webdriver-manager>=3.8.5",
+            "blinker==1.5",
+            "setuptools==71.0.4",
         ]
     },
     entry_points={
