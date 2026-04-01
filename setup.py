@@ -12,7 +12,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 setup(
     name="lidl-plus",
     version="0.4.0",
-    author="Andre Basche",
+    author="Andre Basche, Marcel Bartholome",
     description="Fetch receipts and more from Lidl Plus",
     long_description=long_description,
     long_description_content_type="text/markdown",
