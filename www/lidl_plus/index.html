@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lidl Plus</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f0f2f5;
+    color: #1a1a1a;
+    font-size: 14px;
+  }
+
+  header {
+    background: #003882;
+    color: white;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  header h1 { font-size: 20px; font-weight: 600; }
+  header .sync-info { margin-left: auto; font-size: 12px; opacity: 0.8; }
+
+  nav {
+    display: flex;
+    background: white;
+    border-bottom: 2px solid #e5e7eb;
+    padding: 0 20px;
+    gap: 0;
+  }
+  nav button {
+    padding: 14px 20px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    color: #6b7280;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s;
+  }
+  nav button.active { color: #003882; border-bottom-color: #003882; }
+  nav button:hover { color: #003882; }
+
+  .content { padding: 20px; max-width: 1200px; margin: 0 auto; }
+
+  .tab { display: none; }
+  .tab.active { display: block; }
+
+  /* Search + Filter */
+  .toolbar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .toolbar input, .toolbar select {
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 14px;
+    outline: none;
+    background: white;
+  }
+  .toolbar input:focus, .toolbar select:focus { border-color: #003882; }
+  .toolbar input { flex: 1; min-width: 200px; }
+
+  /* Cards */
+  .card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+
+  .receipt-header {
+    display: flex;
+    align-items: center;
+    padding: 14px 16px;
+    cursor: pointer;
+    user-select: none;
+    gap: 12px;
+  }
+  .receipt-header:hover { background: #f9fafb; }
+  .receipt-date {
+    font-weight: 600;
+    color: #003882;
+    min-width: 90px;
+  }
+  .receipt-store {
+    flex: 1;
+    color: #374151;
+  }
+  .receipt-total {
+    font-weight: 700;
+    font-size: 16px;
+    color: #059669;
+  }
+  .receipt-arrow {
+    color: #9ca3af;
+    transition: transform 0.2s;
+    font-size: 18px;
+  }
+  .receipt-header.open .receipt-arrow { transform: rotate(90deg); }
+
+  .receipt-items {
+    display: none;
+    border-top: 1px solid #f3f4f6;
+  }
+  .receipt-items.open { display: block; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th {
+    background: #f9fafb;
+    padding: 10px 16px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  td {
+    padding: 10px 16px;
+    border-top: 1px solid #f3f4f6;
+    color: #374151;
+  }
+  tr:hover td { background: #fafafa; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge-green { background: #d1fae5; color: #065f46; }
+  .badge-blue  { background: #dbeafe; color: #1e40af; }
+  .badge-red   { background: #fee2e2; color: #991b1b; }
+
+  /* Products */
+  .product-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+  }
+  .product-card {
+    background: white;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    cursor: pointer;
+    transition: box-shadow 0.2s;
+  }
+  .product-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+  .product-name {
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 10px;
+    color: #1a1a1a;
+  }
+  .product-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .stat-item { }
+  .stat-label { font-size: 11px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat-value { font-size: 15px; font-weight: 600; color: #1a1a1a; }
+
+  /* Product detail modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: white;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 560px;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 24px;
+  }
+  .modal h2 { font-size: 18px; margin-bottom: 16px; color: #003882; }
+  .modal-close {
+    float: right;
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: #9ca3af;
+    line-height: 1;
+  }
+  .price-history-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 13px;
+  }
+
+  .empty { text-align: center; padding: 60px 20px; color: #9ca3af; }
+  .loading { text-align: center; padding: 60px 20px; color: #6b7280; }
+
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .stat-card {
+    background: white;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    text-align: center;
+  }
+  .stat-card .value { font-size: 24px; font-weight: 700; color: #003882; }
+  .stat-card .label { font-size: 12px; color: #6b7280; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM5.17 5H2V3H0v2h2l3.6 7.59-1.35 2.44C4.09 15.31 4 15.64 4 16c0 1.1.9 2 2 2h14v-2H6.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63H19c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0023.46 5H5.17z"/></svg>
+  <h1>Lidl Plus</h1>
+  <span class="sync-info" id="syncInfo">Lade...</span>
+</header>
+
+<nav>
+  <button class="active" onclick="showTab('receipts', this)">🧾 Kassenbons</button>
+  <button onclick="showTab('products', this)">📦 Artikel</button>
+</nav>
+
+<div class="content">
+
+  <!-- KASSENBONS TAB -->
+  <div id="tab-receipts" class="tab active">
+    <div class="toolbar">
+      <input type="text" id="receiptSearch" placeholder="Filiale oder Artikel suchen..." oninput="filterReceipts()">
+      <select id="receiptSort" onchange="filterReceipts()">
+        <option value="date-desc">Neueste zuerst</option>
+        <option value="date-asc">Älteste zuerst</option>
+        <option value="total-desc">Höchster Betrag</option>
+        <option value="total-asc">Niedrigster Betrag</option>
+      </select>
+    </div>
+    <div id="receiptList" class="loading">Lade Kassenbons...</div>
+  </div>
+
+  <!-- ARTIKEL TAB -->
+  <div id="tab-products" class="tab">
+    <div class="stats-row" id="productStats"></div>
+    <div class="toolbar">
+      <input type="text" id="productSearch" placeholder="Artikel suchen..." oninput="filterProducts()">
+      <select id="productSort" onchange="filterProducts()">
+        <option value="count-desc">Häufig gekauft</option>
+        <option value="spent-desc">Meiste Ausgaben</option>
+        <option value="name-asc">Name A–Z</option>
+        <option value="last-desc">Zuletzt gekauft</option>
+      </select>
+    </div>
+    <div id="productGrid" class="loading">Lade Artikel...</div>
+  </div>
+
+</div>
+
+<!-- Produkt-Detail Modal -->
+<div class="modal-overlay" id="productModal" onclick="closeModal(event)">
+  <div class="modal">
+    <button class="modal-close" onclick="document.getElementById('productModal').classList.remove('open')">×</button>
+    <h2 id="modalTitle"></h2>
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<script>
+let allReceipts = [];
+let allProducts = [];
+
+async function loadData() {
+  try {
+    const res = await fetch('/local/lidl_plus/data.json?_=' + Date.now());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+
+    allReceipts = data.receipts || [];
+    allProducts = data.products || [];
+
+    const syncTime = data.last_sync ? new Date(data.last_sync).toLocaleString('de-DE') : '–';
+    document.getElementById('syncInfo').textContent = 'Stand: ' + syncTime;
+
+    renderReceipts(allReceipts);
+    renderProducts(allProducts);
+    renderProductStats(allProducts);
+  } catch (e) {
+    document.getElementById('receiptList').innerHTML =
+      '<div class="empty">⚠️ Daten konnten nicht geladen werden.<br>Bitte HA neu starten und Seite neu laden.<br><small>' + e.message + '</small></div>';
+  }
+}
+
+// ── Tab navigation ────────────────────────────────────────────────────────────
+
+function showTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ── Kassenbons ────────────────────────────────────────────────────────────────
+
+function filterReceipts() {
+  const q = document.getElementById('receiptSearch').value.toLowerCase();
+  const sort = document.getElementById('receiptSort').value;
+
+  let filtered = allReceipts.filter(r => {
+    if (!q) return true;
+    if (r.store.toLowerCase().includes(q)) return true;
+    return (r.items || []).some(i => i.name.toLowerCase().includes(q));
+  });
+
+  filtered.sort((a, b) => {
+    if (sort === 'date-desc') return b.date.localeCompare(a.date);
+    if (sort === 'date-asc')  return a.date.localeCompare(b.date);
+    if (sort === 'total-desc') return b.total - a.total;
+    if (sort === 'total-asc')  return a.total - b.total;
+    return 0;
+  });
+
+  renderReceipts(filtered);
+}
+
+function renderReceipts(receipts) {
+  const el = document.getElementById('receiptList');
+  if (!receipts.length) {
+    el.innerHTML = '<div class="empty">Keine Kassenbons gefunden.</div>';
+    return;
+  }
+
+  el.innerHTML = receipts.map((r, idx) => {
+    const date = r.date ? new Date(r.date).toLocaleDateString('de-DE', {
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+    }) : '–';
+    const items = r.items || [];
+    const itemRows = items.map(i => `
+      <tr>
+        <td>${esc(i.name || i.id)}</td>
+        <td>${i.quantity}</td>
+        <td>${i.unit_price || '–'} €</td>
+        <td>${i.unit_price ? (parseFloat(String(i.unit_price).replace(',','.')) * parseFloat(i.quantity)).toFixed(2) : '–'} €</td>
+      </tr>`).join('');
+
+    return `
+      <div class="card">
+        <div class="receipt-header" onclick="toggleReceipt(this)">
+          <span class="receipt-date">${date}</span>
+          <span class="receipt-store">${esc(r.store || 'Unbekannt')}</span>
+          <span class="receipt-total">${r.total.toFixed(2)} €</span>
+          <span class="receipt-arrow">›</span>
+        </div>
+        <div class="receipt-items">
+          <table>
+            <thead><tr><th>Artikel</th><th>Menge</th><th>Einzelpreis</th><th>Gesamt</th></tr></thead>
+            <tbody>${itemRows || '<tr><td colspan="4" style="color:#9ca3af;text-align:center">Keine Artikel</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function toggleReceipt(header) {
+  header.classList.toggle('open');
+  header.nextElementSibling.classList.toggle('open');
+}
+
+// ── Artikel ───────────────────────────────────────────────────────────────────
+
+function filterProducts() {
+  const q = document.getElementById('productSearch').value.toLowerCase();
+  const sort = document.getElementById('productSort').value;
+
+  let filtered = allProducts.filter(p => !q || p.name.toLowerCase().includes(q));
+
+  filtered.sort((a, b) => {
+    if (sort === 'count-desc') return b.purchase_count - a.purchase_count;
+    if (sort === 'spent-desc') return b.total_spent - a.total_spent;
+    if (sort === 'name-asc')   return a.name.localeCompare(b.name, 'de');
+    if (sort === 'last-desc')  return (b.last_date || '').localeCompare(a.last_date || '');
+    return 0;
+  });
+
+  renderProducts(filtered);
+}
+
+function renderProductStats(products) {
+  const total = products.reduce((s, p) => s + p.total_spent, 0);
+  const totalQty = products.reduce((s, p) => s + p.purchase_count, 0);
+  document.getElementById('productStats').innerHTML = `
+    <div class="stat-card"><div class="value">${products.length}</div><div class="label">Einzigartige Artikel</div></div>
+    <div class="stat-card"><div class="value">${totalQty}</div><div class="label">Käufe gesamt</div></div>
+    <div class="stat-card"><div class="value">${total.toFixed(2)} €</div><div class="label">Gesamtausgaben</div></div>
+  `;
+}
+
+function renderProducts(products) {
+  const el = document.getElementById('productGrid');
+  if (!products.length) {
+    el.innerHTML = '<div class="empty">Keine Artikel gefunden.</div>';
+    return;
+  }
+
+  el.className = 'product-grid';
+  el.innerHTML = products.map(p => {
+    const lastDate = p.last_date ? new Date(p.last_date).toLocaleDateString('de-DE') : '–';
+    return `
+      <div class="product-card" onclick="showProductDetail('${esc(p.id)}')">
+        <div class="product-name">${esc(p.name || p.id)}</div>
+        <div class="product-stats">
+          <div class="stat-item">
+            <div class="stat-label">Käufe</div>
+            <div class="stat-value">${p.purchase_count}×</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Akt. Preis</div>
+            <div class="stat-value">${p.last_price.toFixed(2)} €</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Ausgaben</div>
+            <div class="stat-value">${p.total_spent.toFixed(2)} €</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">Zuletzt</div>
+            <div class="stat-value" style="font-size:13px">${lastDate}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function showProductDetail(id) {
+  const p = allProducts.find(x => x.id === id);
+  if (!p) return;
+
+  const lastDate = p.last_date ? new Date(p.last_date).toLocaleString('de-DE') : '–';
+  const priceHistory = (p.price_history || []).slice().reverse();
+
+  const historyRows = priceHistory.map(h => {
+    const d = h.date ? new Date(h.date).toLocaleDateString('de-DE') : '–';
+    return `<div class="price-history-item">
+      <span>${d}</span>
+      <span style="color:#6b7280">${esc(h.store || '')}</span>
+      <strong>${parseFloat(h.price).toFixed(2)} €</strong>
+    </div>`;
+  }).join('') || '<div style="color:#9ca3af;padding:8px 0">Keine Preishistorie</div>';
+
+  document.getElementById('modalTitle').textContent = p.name || p.id;
+  document.getElementById('modalContent').innerHTML = `
+    <div class="product-stats" style="margin-bottom:16px">
+      <div class="stat-item"><div class="stat-label">Käufe gesamt</div><div class="stat-value">${p.purchase_count}×</div></div>
+      <div class="stat-item"><div class="stat-label">Menge gesamt</div><div class="stat-value">${p.total_quantity}</div></div>
+      <div class="stat-item"><div class="stat-label">Ausgaben gesamt</div><div class="stat-value">${p.total_spent.toFixed(2)} €</div></div>
+      <div class="stat-item"><div class="stat-label">Ø Preis</div><div class="stat-value">${p.avg_price.toFixed(2)} €</div></div>
+      <div class="stat-item"><div class="stat-label">Aktueller Preis</div><div class="stat-value">${p.last_price.toFixed(2)} €</div></div>
+      <div class="stat-item"><div class="stat-label">Zuletzt gekauft</div><div class="stat-value" style="font-size:13px">${lastDate}</div></div>
+      <div class="stat-item"><div class="stat-label">Filiale</div><div class="stat-value" style="font-size:13px">${esc(p.last_store || '–')}</div></div>
+    </div>
+    <h3 style="font-size:14px;color:#6b7280;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Preishistorie</h3>
+    ${historyRows}
+  `;
+  document.getElementById('productModal').classList.add('open');
+}
+
+function closeModal(e) {
+  if (e.target === document.getElementById('productModal')) {
+    document.getElementById('productModal').classList.remove('open');
+  }
+}
+
+function esc(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+loadData();
+// Auto-refresh every 5 minutes
+setInterval(loadData, 5 * 60 * 1000);
+</script>
+</body>
+</html>

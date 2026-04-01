@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 import requests
 
-from lidlplus.exceptions import (
+from .exceptions import (
     WebBrowserException,
     LoginError,
     LegalTermsException,
@@ -207,72 +207,12 @@ class LidlPlusApi:
         if verify_mode not in ["phone", "email"]:
             raise ValueError(f'Unknown 2fa-mode "{verify_mode}" - Only "phone" or "email" supported')
         response = browser.wait_for_request(f"{self._AUTH_API}/Account/Login.*", 10).response
-        location = response.headers.get("Location") or ""
-
-        # Check login response location for direct success
-        success_indicators = [
-            "/connect/authorize/callback" in location,
-            f"{self._APP}://callback" in location,
-            "code=" in location,
-        ]
-        if any(success_indicators):
-            return
-
-        # Wait briefly for the browser to complete all redirects after login
-        try:
-            browser.wait_for_request(f"{re.escape(self._APP)}://callback.*", 3)
-            return  # callback arrived — no 2FA needed
-        except Exception:
-            pass
-
-        # Check all captured requests so far for the authorization code
-        for request in reversed(browser.requests):
-            if not request.response:
-                continue
-            req_location = request.response.headers.get("Location") or ""
-            req_url = request.url or ""
-            if re.findall("code=([0-9A-F]+)", req_location + req_url):
-                return
-
-        # 2FA is actually needed — try to find the method selection button
-        try:
-            element = WebDriverWait(browser, 5).until(
-                expected_conditions.visibility_of_element_located((By.CLASS_NAME, verify_mode))
-            )
+        if "/connect/authorize/callback" not in (response.headers.get("Location") or ""):
+            element = wait.until(expected_conditions.visibility_of_element_located((By.CLASS_NAME, verify_mode)))
             element.find_element(By.TAG_NAME, "button").click()
-        except Exception:
-            pass  # Some accounts skip method selection and go directly to code input
-
-        verify_code = verify_token_func()
-
-        # Try multiple selectors for the code input field
-        for selector in [
-            (By.NAME, "VerificationCode"),
-            (By.NAME, "verificationCode"),
-            (By.CSS_SELECTOR, "input[autocomplete='one-time-code']"),
-            (By.CSS_SELECTOR, "input[type='tel']"),
-            (By.CSS_SELECTOR, "input[type='number']"),
-        ]:
-            try:
-                field = WebDriverWait(browser, 5).until(
-                    expected_conditions.element_to_be_clickable(selector)
-                )
-                field.send_keys(verify_code)
-                break
-            except Exception:
-                continue
-
-        # Try multiple selectors for the submit button
-        for selector in [
-            (By.CLASS_NAME, "role_next"),
-            (By.CSS_SELECTOR, "button[type='submit']"),
-            (By.XPATH, "//button[@type='submit']"),
-        ]:
-            try:
-                self._click(browser, selector)
-                break
-            except Exception:
-                continue
+            verify_code = verify_token_func()
+            browser.find_element(By.NAME, "VerificationCode").send_keys(verify_code)
+            self._click(browser, (By.CLASS_NAME, "role_next"))
 
     def login(self, email, password, **kwargs):
         """Simulate app auth"""
