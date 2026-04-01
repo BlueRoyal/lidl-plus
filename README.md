@@ -36,7 +36,7 @@ $ lidl-plus --language=de --country=DE --user=your@email.com auth
 Enter your lidl plus password:
 Enter the verify code you received via phone: 123456
 ------------------------- refresh token ------------------------
-2D4FC2A699AC703CAB8D017012658234917651203746021A4AA3F735C8A53B7F
+B7E3A1F9C2D4E8B0A5F1C3D7E2B4A9F0C6D1E5B8A2F7C0D3E6B9A4F2C5D8E1B3
 ----------------------------------------------------------------
 ```
 
