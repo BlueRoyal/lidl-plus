@@ -34,7 +34,6 @@ To log in to Lidl Plus we simulate the app login using a browser. After receivin
 ```bash
 $ lidl-plus --language=de --country=DE --user=your@email.com auth
 Enter your lidl plus password:
-Enter the verify code you received via phone: 123456
 ------------------------- refresh token ------------------------
 B7E3A1F9C2D4E8B0A5F1C3D7E2B4A9F0C6D1E5B8A2F7C0D3E6B9A4F2C5D8E1B3
 ----------------------------------------------------------------
