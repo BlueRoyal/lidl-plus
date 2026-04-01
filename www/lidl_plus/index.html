@@ -4,350 +4,434 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lidl Plus</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #f0f2f5;
-    color: #1a1a1a;
-    font-size: 14px;
-  }
-
-  header {
-    background: #003882;
-    color: white;
-    padding: 16px 20px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-  }
-  header h1 { font-size: 20px; font-weight: 600; }
-  header .sync-info { margin-left: auto; font-size: 12px; opacity: 0.8; }
-
-  nav {
-    display: flex;
-    background: white;
-    border-bottom: 2px solid #e5e7eb;
-    padding: 0 20px;
-    gap: 0;
-  }
-  nav button {
-    padding: 14px 20px;
-    border: none;
-    background: none;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    color: #6b7280;
-    border-bottom: 3px solid transparent;
-    margin-bottom: -2px;
-    transition: all 0.2s;
-  }
-  nav button.active { color: #003882; border-bottom-color: #003882; }
-  nav button:hover { color: #003882; }
-
-  .content { padding: 20px; max-width: 1200px; margin: 0 auto; }
-
-  .tab { display: none; }
-  .tab.active { display: block; }
-
-  /* Search + Filter */
-  .toolbar {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-  }
-  .toolbar input, .toolbar select {
-    padding: 8px 12px;
-    border: 1px solid #d1d5db;
-    border-radius: 8px;
-    font-size: 14px;
-    outline: none;
-    background: white;
-  }
-  .toolbar input:focus, .toolbar select:focus { border-color: #003882; }
-  .toolbar input { flex: 1; min-width: 200px; }
-
-  /* Cards */
-  .card {
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-    margin-bottom: 12px;
-    overflow: hidden;
-  }
-
-  .receipt-header {
-    display: flex;
-    align-items: center;
-    padding: 14px 16px;
-    cursor: pointer;
-    user-select: none;
-    gap: 12px;
-  }
-  .receipt-header:hover { background: #f9fafb; }
-  .receipt-date {
-    font-weight: 600;
-    color: #003882;
-    min-width: 90px;
-  }
-  .receipt-store {
-    flex: 1;
-    color: #374151;
-  }
-  .receipt-total {
-    font-weight: 700;
-    font-size: 16px;
-    color: #059669;
-  }
-  .receipt-arrow {
-    color: #9ca3af;
-    transition: transform 0.2s;
-    font-size: 18px;
-  }
-  .receipt-header.open .receipt-arrow { transform: rotate(90deg); }
-
-  .receipt-items {
-    display: none;
-    border-top: 1px solid #f3f4f6;
-  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .tab { display: none !important; }
+  .tab.active { display: block !important; }
+  .tab-btn { padding: 13px 18px; border: none; background: none; cursor: pointer; font-size: 14px; font-weight: 500; color: #6b7280; border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.2s; white-space: nowrap; }
+  .tab-btn:hover { color: #003882; }
+  .tab-btn.active { color: #003882; border-bottom-color: #003882; }
+  .receipt-items { display: none; }
   .receipt-items.open { display: block; }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  th {
-    background: #f9fafb;
-    padding: 10px 16px;
-    text-align: left;
-    font-size: 12px;
-    font-weight: 600;
-    color: #6b7280;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-  td {
-    padding: 10px 16px;
-    border-top: 1px solid #f3f4f6;
-    color: #374151;
-  }
-  tr:hover td { background: #fafafa; }
-
-  .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 600;
-  }
-  .badge-green { background: #d1fae5; color: #065f46; }
-  .badge-blue  { background: #dbeafe; color: #1e40af; }
-  .badge-red   { background: #fee2e2; color: #991b1b; }
-
-  /* Products */
-  .product-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 12px;
-  }
-  .product-card {
-    background: white;
-    border-radius: 12px;
-    padding: 16px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-    cursor: pointer;
-    transition: box-shadow 0.2s;
-  }
-  .product-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
-  .product-name {
-    font-weight: 600;
-    font-size: 15px;
-    margin-bottom: 10px;
-    color: #1a1a1a;
-  }
-  .product-stats {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-  }
-  .stat-item { }
-  .stat-label { font-size: 11px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.04em; }
-  .stat-value { font-size: 15px; font-weight: 600; color: #1a1a1a; }
-
-  /* Product detail modal */
-  .modal-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.5);
-    z-index: 200;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-  }
+  .chevron { transition: transform 0.2s; display: inline-block; }
+  .chevron.open { transform: rotate(90deg); }
+  .modal-overlay { display: none; }
   .modal-overlay.open { display: flex; }
-  .modal {
-    background: white;
-    border-radius: 16px;
-    width: 100%;
-    max-width: 560px;
-    max-height: 80vh;
-    overflow-y: auto;
-    padding: 24px;
-  }
-  .modal h2 { font-size: 18px; margin-bottom: 16px; color: #003882; }
-  .modal-close {
-    float: right;
-    background: none;
-    border: none;
-    font-size: 24px;
-    cursor: pointer;
-    color: #9ca3af;
-    line-height: 1;
-  }
-  .price-history-item {
-    display: flex;
-    justify-content: space-between;
-    padding: 8px 0;
-    border-bottom: 1px solid #f3f4f6;
-    font-size: 13px;
-  }
-
-  .empty { text-align: center; padding: 60px 20px; color: #9ca3af; }
-  .loading { text-align: center; padding: 60px 20px; color: #6b7280; }
-
-  .stats-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 12px;
-    margin-bottom: 20px;
-  }
-  .stat-card {
-    background: white;
-    border-radius: 12px;
-    padding: 16px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-    text-align: center;
-  }
-  .stat-card .value { font-size: 24px; font-weight: 700; color: #003882; }
-  .stat-card .label { font-size: 12px; color: #6b7280; margin-top: 4px; }
+  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 </style>
 </head>
-<body>
+<body class="bg-gray-100 text-gray-900 text-sm">
 
-<header>
-  <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM5.17 5H2V3H0v2h2l3.6 7.59-1.35 2.44C4.09 15.31 4 15.64 4 16c0 1.1.9 2 2 2h14v-2H6.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63H19c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0023.46 5H5.17z"/></svg>
-  <h1>Lidl Plus</h1>
-  <span class="sync-info" id="syncInfo">Lade...</span>
+<!-- ── HEADER ─────────────────────────────────────────────────────────────── -->
+<header class="bg-[#003882] text-white px-5 py-3.5 flex items-center gap-3 sticky top-0 z-50 shadow-xl">
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+    <path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM5.17 5H2V3H0v2h2l3.6 7.59-1.35 2.44C4.09 15.31 4 15.64 4 16c0 1.1.9 2 2 2h14v-2H6.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63H19c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0023.46 5H5.17z"/>
+  </svg>
+  <h1 class="text-lg font-semibold tracking-tight">Lidl Plus</h1>
+  <span class="ml-auto text-xs opacity-70 shrink-0" id="syncInfo">Lade…</span>
 </header>
 
-<nav>
-  <button class="active" onclick="showTab('receipts', this)">🧾 Kassenbons</button>
-  <button onclick="showTab('products', this)">📦 Artikel</button>
+<!-- ── NAVIGATION ────────────────────────────────────────────────────────── -->
+<nav class="bg-white border-b-2 border-gray-200 px-4 flex overflow-x-auto">
+  <button class="tab-btn active" onclick="showTab('overview',this)">📊 Übersicht</button>
+  <button class="tab-btn" onclick="showTab('receipts',this)">🧾 Kassenbons</button>
+  <button class="tab-btn" onclick="showTab('products',this)">📦 Artikel</button>
 </nav>
 
-<div class="content">
+<div class="max-w-7xl mx-auto px-4 py-5">
 
-  <!-- KASSENBONS TAB -->
-  <div id="tab-receipts" class="tab active">
-    <div class="toolbar">
-      <input type="text" id="receiptSearch" placeholder="Filiale oder Artikel suchen..." oninput="filterReceipts()">
-      <select id="receiptSort" onchange="filterReceipts()">
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: ÜBERSICHT
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-overview" class="tab active">
+
+  <!-- KPI-Karten -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5" id="overviewCards">
+    <div class="bg-white rounded-2xl p-4 shadow-sm text-center animate-pulse">
+      <div class="h-7 bg-gray-100 rounded mb-2 mx-4"></div>
+      <div class="h-3 bg-gray-100 rounded mx-6"></div>
+    </div>
+  </div>
+
+  <!-- Monatliche Ausgaben -->
+  <div class="bg-white rounded-2xl p-5 shadow-sm mb-4">
+    <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">📅 Ausgaben pro Monat</h2>
+    <div style="height:260px;position:relative"><canvas id="chartMonthly"></canvas></div>
+  </div>
+
+  <!-- Kategorie + Filialen -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="bg-white rounded-2xl p-5 shadow-sm">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">🥦 Ausgaben nach Kategorie</h2>
+      <div style="height:240px;position:relative"><canvas id="chartCategory"></canvas></div>
+    </div>
+    <div class="bg-white rounded-2xl p-5 shadow-sm">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">🏪 Top Filialen</h2>
+      <div style="height:240px;position:relative"><canvas id="chartStores"></canvas></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: KASSENBONS
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-receipts" class="tab">
+
+  <!-- Filter-Panel -->
+  <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <input type="text" id="receiptSearch" placeholder="🔍 Filiale oder Artikel…"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] transition-colors"
+             oninput="filterReceipts()">
+      <select id="receiptStore"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterReceipts()">
+        <option value="">Alle Filialen</option>
+      </select>
+      <select id="receiptSort"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterReceipts()">
         <option value="date-desc">Neueste zuerst</option>
         <option value="date-asc">Älteste zuerst</option>
         <option value="total-desc">Höchster Betrag</option>
         <option value="total-asc">Niedrigster Betrag</option>
       </select>
+      <div class="flex gap-2">
+        <input type="number" id="receiptMin" placeholder="Min €" step="0.01" min="0"
+               class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] w-full"
+               oninput="filterReceipts()">
+        <input type="number" id="receiptMax" placeholder="Max €" step="0.01" min="0"
+               class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] w-full"
+               oninput="filterReceipts()">
+      </div>
+      <input type="date" id="receiptFrom"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]"
+             onchange="filterReceipts()">
+      <input type="date" id="receiptTo"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]"
+             onchange="filterReceipts()">
     </div>
-    <div id="receiptList" class="loading">Lade Kassenbons...</div>
+    <p class="mt-2.5 text-xs text-gray-400" id="receiptCount"></p>
   </div>
 
-  <!-- ARTIKEL TAB -->
-  <div id="tab-products" class="tab">
-    <div class="stats-row" id="productStats"></div>
-    <div class="toolbar">
-      <input type="text" id="productSearch" placeholder="Artikel suchen..." oninput="filterProducts()">
-      <select id="productSort" onchange="filterProducts()">
+  <div id="receiptList" class="text-center py-16 text-gray-400">Lade Kassenbons…</div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: ARTIKEL
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-products" class="tab">
+
+  <!-- KPI-Karten -->
+  <div class="grid grid-cols-3 gap-3 mb-4" id="productStats"></div>
+
+  <!-- Filter-Panel -->
+  <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <input type="text" id="productSearch" placeholder="🔍 Artikel suchen…"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]"
+             oninput="filterProducts()">
+      <select id="productSort"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterProducts()">
         <option value="count-desc">Häufig gekauft</option>
         <option value="spent-desc">Meiste Ausgaben</option>
         <option value="name-asc">Name A–Z</option>
         <option value="last-desc">Zuletzt gekauft</option>
+        <option value="price-desc">Höchster Preis</option>
+        <option value="price-asc">Niedrigster Preis</option>
+      </select>
+      <select id="productTrend"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterProducts()">
+        <option value="">Alle Preistrends</option>
+        <option value="up">↑ Preis gestiegen</option>
+        <option value="down">↓ Preis gesunken</option>
+        <option value="stable">→ Preis stabil</option>
+      </select>
+      <select id="productPeriod"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterProducts()">
+        <option value="">Alle Zeiträume</option>
+        <option value="30">Letzte 30 Tage</option>
+        <option value="90">Letzte 90 Tage</option>
+        <option value="180">Letzte 6 Monate</option>
+        <option value="365">Letztes Jahr</option>
       </select>
     </div>
-    <div id="productGrid" class="loading">Lade Artikel...</div>
+    <p class="mt-2.5 text-xs text-gray-400" id="productCount"></p>
   </div>
+
+  <div id="productGrid" class="text-center py-16 text-gray-400">Lade Artikel…</div>
 
 </div>
 
-<!-- Produkt-Detail Modal -->
-<div class="modal-overlay" id="productModal" onclick="closeModal(event)">
-  <div class="modal">
-    <button class="modal-close" onclick="document.getElementById('productModal').classList.remove('open')">×</button>
-    <h2 id="modalTitle"></h2>
-    <div id="modalContent"></div>
+</div><!-- /max-w-7xl -->
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PRODUKT-DETAIL MODAL
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay fixed inset-0 bg-black/50 z-50 items-center justify-center p-4"
+     id="productModal" onclick="closeModal(event)">
+  <div class="bg-white rounded-2xl w-full max-w-xl max-h-[88vh] overflow-y-auto shadow-2xl">
+    <div class="flex items-start justify-between px-6 pt-5 pb-3 sticky top-0 bg-white rounded-t-2xl border-b border-gray-100">
+      <h2 class="text-base font-bold text-[#003882] pr-4 leading-tight" id="modalTitle"></h2>
+      <button class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0 mt-[-2px]"
+              onclick="document.getElementById('productModal').classList.remove('open');if(chartModal){chartModal.destroy();chartModal=null;}">×</button>
+    </div>
+    <div class="px-6 pb-6 pt-4">
+      <div id="modalStats" class="grid grid-cols-3 gap-2 mb-5"></div>
+      <div id="modalChartWrapper" style="position:relative;height:200px;margin-bottom:20px">
+        <canvas id="modalPriceChart"></canvas>
+      </div>
+      <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Preishistorie</h3>
+      <div id="modalHistory"></div>
+    </div>
   </div>
 </div>
 
 <script>
-let allReceipts = [];
-let allProducts = [];
+// ── State ─────────────────────────────────────────────────────────────────────
+let allReceipts = [], allProducts = [], appData = {};
+let chartMonthly, chartCategory, chartStores, chartModal;
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const fmt = v => Number(v||0).toFixed(2) + ' €';
+
+function fmtDate(s) {
+  if (!s) return '–';
+  const d = new Date(s);
+  if (isNaN(d)) return String(s).slice(0,10);
+  return d.toLocaleDateString('de-DE', {day:'2-digit', month:'2-digit', year:'numeric'});
+}
+function fmtDateTime(s) {
+  if (!s) return '–';
+  const d = new Date(s);
+  if (isNaN(d)) return String(s).slice(0,16).replace('T',' ');
+  return d.toLocaleString('de-DE', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+}
+
+function getPriceTrend(p) {
+  const hist = (p.price_history||[]).filter(h=>h.price>0);
+  if (hist.length < 2) return 'stable';
+  const prev = parseFloat(hist[hist.length-2].price);
+  const curr = parseFloat(hist[hist.length-1].price);
+  if (curr > prev * 1.005) return 'up';
+  if (curr < prev * 0.995) return 'down';
+  return 'stable';
+}
+
+// ── Data loading ──────────────────────────────────────────────────────────────
 async function loadData() {
   try {
     const res = await fetch('/local/lidl_plus/data.json?_=' + Date.now());
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
+    appData = await res.json();
+    allReceipts = appData.receipts || [];
+    allProducts = appData.products || [];
 
-    allReceipts = data.receipts || [];
-    allProducts = data.products || [];
-
-    const syncTime = data.last_sync ? new Date(data.last_sync).toLocaleString('de-DE') : '–';
+    const syncTime = appData.last_sync
+      ? new Date(appData.last_sync).toLocaleString('de-DE', {dateStyle:'short', timeStyle:'short'})
+      : '–';
     document.getElementById('syncInfo').textContent = 'Stand: ' + syncTime;
 
-    renderReceipts(allReceipts);
-    renderProducts(allProducts);
+    renderOverview();
+    populateStoreFilter();
+    filterReceipts();
     renderProductStats(allProducts);
-  } catch (e) {
-    document.getElementById('receiptList').innerHTML =
-      '<div class="empty">⚠️ Daten konnten nicht geladen werden.<br>Bitte HA neu starten und Seite neu laden.<br><small>' + e.message + '</small></div>';
+    filterProducts();
+  } catch(e) {
+    ['receiptList','productGrid'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = `<div class="text-center py-16 text-red-500">⚠️ Daten konnten nicht geladen werden.<br><small class="text-gray-400">${e.message}</small></div>`;
+    });
   }
 }
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
-
 function showTab(name, btn) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
   btn.classList.add('active');
 }
 
-// ── Kassenbons ────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// ÜBERSICHT
+// ══════════════════════════════════════════════════════════════════════════════
+function renderOverview() {
+  const totalSpent = allReceipts.reduce((s,r)=>s+(r.total||0), 0);
+  const avgBasket = appData.avg_basket || (allReceipts.length ? totalSpent/allReceipts.length : 0);
+  const curMonth = appData.current_month || 0;
+
+  document.getElementById('overviewCards').innerHTML = [
+    {icon:'🧾', val:allReceipts.length,       label:'Kassenbons',           color:'text-[#003882]'},
+    {icon:'📦', val:allProducts.length,        label:'Einzigartige Artikel', color:'text-purple-600'},
+    {icon:'💶', val:fmt(totalSpent),           label:'Gesamtausgaben',       color:'text-green-600'},
+    {icon:'🛒', val:fmt(avgBasket),            label:'Ø Einkauf',            color:'text-orange-500'},
+  ].map(c=>`
+    <div class="bg-white rounded-2xl p-4 shadow-sm text-center">
+      <div class="text-2xl mb-1.5">${c.icon}</div>
+      <div class="text-xl font-bold ${c.color}">${c.val}</div>
+      <div class="text-xs text-gray-400 mt-1">${c.label}</div>
+    </div>`).join('');
+
+  renderMonthlyChart();
+  renderCategoryChart();
+  renderStoresChart();
+}
+
+function renderMonthlyChart() {
+  let byMonth = appData.spending_by_month || {};
+  if (!Object.keys(byMonth).length) {
+    allReceipts.forEach(r => {
+      const m = (r.date||'').slice(0,7);
+      if (m) byMonth[m] = (byMonth[m]||0) + (r.total||0);
+    });
+  }
+  const months = Object.keys(byMonth).sort().slice(-12);
+  const values = months.map(m => byMonth[m]);
+  const labels = months.map(m => {
+    const [y,mo] = m.split('-');
+    return new Date(+y, +mo-1, 1).toLocaleString('de-DE', {month:'short', year:'2-digit'});
+  });
+  const now = new Date().toISOString().slice(0,7);
+
+  if (chartMonthly) chartMonthly.destroy();
+  chartMonthly = new Chart(document.getElementById('chartMonthly'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: months.map(m => m===now ? '#ffed00' : 'rgba(0,56,130,0.75)'),
+        borderColor:      months.map(m => m===now ? '#d4c400' : '#003882'),
+        borderWidth: 1,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>` ${fmt(c.raw)}`}}},
+      scales:{
+        y:{ticks:{callback:v=>v.toFixed(0)+'€'}, grid:{color:'#f3f4f6'}},
+        x:{grid:{display:false}}
+      }
+    }
+  });
+}
+
+function renderCategoryChart() {
+  const food    = appData.food_total    || 0;
+  const nonfood = appData.nonfood_total || 0;
+  const total   = allReceipts.reduce((s,r)=>s+(r.total||0), 0);
+  const unknown = Math.max(0, total - food - nonfood);
+
+  if (chartCategory) chartCategory.destroy();
+  chartCategory = new Chart(document.getElementById('chartCategory'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Lebensmittel (7%)', 'Non-Food (19%)', 'Sonstiges'],
+      datasets: [{
+        data: [food, nonfood, unknown],
+        backgroundColor: ['#003882','#ffed00','#e5e7eb'],
+        borderWidth: 2, borderColor:'#fff',
+      }]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      cutout:'65%',
+      plugins:{
+        legend:{position:'bottom', labels:{font:{size:12}, padding:12}},
+        tooltip:{callbacks:{label:c=>` ${fmt(c.raw)} (${((c.raw/(food+nonfood+unknown||1))*100).toFixed(1)}%)`}}
+      }
+    }
+  });
+}
+
+function renderStoresChart() {
+  let byStore = appData.spending_by_store || {};
+  if (!Object.keys(byStore).length) {
+    allReceipts.forEach(r => {
+      if (r.store) byStore[r.store] = (byStore[r.store]||0) + (r.total||0);
+    });
+  }
+  const sorted = Object.entries(byStore).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const labels = sorted.map(([k])=>k.length>22?k.slice(0,20)+'…':k);
+  const values = sorted.map(([,v])=>v);
+
+  if (chartStores) chartStores.destroy();
+  chartStores = new Chart(document.getElementById('chartStores'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: 'rgba(0,56,130,0.75)',
+        borderRadius: 5,
+      }]
+    },
+    options: {
+      indexAxis:'y',
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>` ${fmt(c.raw)}`}}},
+      scales:{
+        x:{ticks:{callback:v=>v.toFixed(0)+'€'}, grid:{color:'#f3f4f6'}},
+        y:{grid:{display:false}}
+      }
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// KASSENBONS
+// ══════════════════════════════════════════════════════════════════════════════
+function populateStoreFilter() {
+  const stores = [...new Set(allReceipts.map(r=>r.store).filter(Boolean))].sort();
+  const sel = document.getElementById('receiptStore');
+  // Keep first "Alle Filialen" option
+  while (sel.options.length > 1) sel.remove(1);
+  stores.forEach(s => { const o=document.createElement('option'); o.value=s; o.textContent=s; sel.appendChild(o); });
+}
 
 function filterReceipts() {
-  const q = document.getElementById('receiptSearch').value.toLowerCase();
-  const sort = document.getElementById('receiptSort').value;
+  const q     = document.getElementById('receiptSearch').value.toLowerCase();
+  const sort  = document.getElementById('receiptSort').value;
+  const store = document.getElementById('receiptStore').value;
+  const minV  = parseFloat(document.getElementById('receiptMin').value) || 0;
+  const maxV  = parseFloat(document.getElementById('receiptMax').value) || Infinity;
+  const from  = document.getElementById('receiptFrom').value;
+  const to    = document.getElementById('receiptTo').value;
 
   let filtered = allReceipts.filter(r => {
-    if (!q) return true;
-    if (r.store.toLowerCase().includes(q)) return true;
-    return (r.items || []).some(i => i.name.toLowerCase().includes(q));
+    if (store && r.store !== store) return false;
+    if (r.total < minV || r.total > maxV) return false;
+    if (from && (r.date||'').slice(0,10) < from) return false;
+    if (to   && (r.date||'').slice(0,10) > to)   return false;
+    if (q) {
+      const inStore = (r.store||'').toLowerCase().includes(q);
+      const inItems = (r.items||[]).some(i=>(i.name||'').toLowerCase().includes(q));
+      if (!inStore && !inItems) return false;
+    }
+    return true;
   });
 
-  filtered.sort((a, b) => {
-    if (sort === 'date-desc') return b.date.localeCompare(a.date);
-    if (sort === 'date-asc')  return a.date.localeCompare(b.date);
-    if (sort === 'total-desc') return b.total - a.total;
-    if (sort === 'total-asc')  return a.total - b.total;
+  filtered.sort((a,b) => {
+    if (sort==='date-desc')  return (b.date||'').localeCompare(a.date||'');
+    if (sort==='date-asc')   return (a.date||'').localeCompare(b.date||'');
+    if (sort==='total-desc') return b.total - a.total;
+    if (sort==='total-asc')  return a.total - b.total;
     return 0;
   });
+
+  const sum = filtered.reduce((s,r)=>s+r.total, 0);
+  document.getElementById('receiptCount').textContent =
+    `${filtered.length} von ${allReceipts.length} Kassenbons · Summe: ${fmt(sum)}`;
 
   renderReceipts(filtered);
 }
@@ -355,155 +439,226 @@ function filterReceipts() {
 function renderReceipts(receipts) {
   const el = document.getElementById('receiptList');
   if (!receipts.length) {
-    el.innerHTML = '<div class="empty">Keine Kassenbons gefunden.</div>';
+    el.innerHTML = '<div class="text-center py-16 text-gray-400">Keine Kassenbons gefunden.</div>';
     return;
   }
+  el.innerHTML = receipts.map(r => {
+    const items = r.items||[];
+    const rows = items.map(i => {
+      const price = parseFloat(String(i.unit_price||0).replace(',','.'));
+      const qty   = parseFloat(String(i.quantity||1).replace(',','.'));
+      const line  = (price*qty).toFixed(2);
+      return `<tr class="border-t border-gray-50 hover:bg-gray-50/70">
+        <td class="px-4 py-2.5 text-gray-800">${esc(i.name||i.id)}</td>
+        <td class="px-4 py-2.5 text-gray-500 text-right">${qty}</td>
+        <td class="px-4 py-2.5 text-gray-500 text-right">${price?price.toFixed(2)+' €':'–'}</td>
+        <td class="px-4 py-2.5 font-semibold text-right">${price?line+' €':'–'}</td>
+      </tr>`;
+    }).join('');
 
-  el.innerHTML = receipts.map((r, idx) => {
-    const date = r.date ? new Date(r.date).toLocaleDateString('de-DE', {
-      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
-    }) : '–';
-    const items = r.items || [];
-    const itemRows = items.map(i => `
-      <tr>
-        <td>${esc(i.name || i.id)}</td>
-        <td>${i.quantity}</td>
-        <td>${i.unit_price || '–'} €</td>
-        <td>${i.unit_price ? (parseFloat(String(i.unit_price).replace(',','.')) * parseFloat(i.quantity)).toFixed(2) : '–'} €</td>
-      </tr>`).join('');
-
-    return `
-      <div class="card">
-        <div class="receipt-header" onclick="toggleReceipt(this)">
-          <span class="receipt-date">${date}</span>
-          <span class="receipt-store">${esc(r.store || 'Unbekannt')}</span>
-          <span class="receipt-total">${r.total.toFixed(2)} €</span>
-          <span class="receipt-arrow">›</span>
-        </div>
-        <div class="receipt-items">
-          <table>
-            <thead><tr><th>Artikel</th><th>Menge</th><th>Einzelpreis</th><th>Gesamt</th></tr></thead>
-            <tbody>${itemRows || '<tr><td colspan="4" style="color:#9ca3af;text-align:center">Keine Artikel</td></tr>'}</tbody>
-          </table>
-        </div>
-      </div>`;
+    return `<div class="bg-white rounded-2xl shadow-sm mb-2 overflow-hidden">
+      <div class="flex items-center gap-3 px-4 py-3.5 cursor-pointer hover:bg-gray-50 select-none"
+           onclick="toggleReceipt(this)">
+        <span class="font-semibold text-[#003882] whitespace-nowrap text-sm">${fmtDate(r.date)}</span>
+        <span class="flex-1 text-gray-600 truncate">${esc(r.store||'Unbekannt')}</span>
+        <span class="font-bold text-green-600 whitespace-nowrap">${fmt(r.total)}</span>
+        <span class="text-xs text-gray-400 whitespace-nowrap hidden sm:inline">${items.length} Artikel</span>
+        <span class="chevron text-gray-400 text-lg leading-none">›</span>
+      </div>
+      <div class="receipt-items border-t border-gray-100">
+        <table class="w-full text-sm">
+          <thead><tr class="bg-gray-50 text-xs text-gray-400 uppercase tracking-wide">
+            <th class="px-4 py-2 text-left font-medium">Artikel</th>
+            <th class="px-4 py-2 text-right font-medium">Menge</th>
+            <th class="px-4 py-2 text-right font-medium">Einzelpreis</th>
+            <th class="px-4 py-2 text-right font-medium">Gesamt</th>
+          </tr></thead>
+          <tbody>${rows||'<tr><td colspan="4" class="px-4 py-5 text-center text-gray-400">Keine Artikel</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
   }).join('');
 }
 
 function toggleReceipt(header) {
-  header.classList.toggle('open');
-  header.nextElementSibling.classList.toggle('open');
+  const items   = header.nextElementSibling;
+  const chevron = header.querySelector('.chevron');
+  items.classList.toggle('open');
+  chevron.classList.toggle('open');
 }
 
-// ── Artikel ───────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// ARTIKEL
+// ══════════════════════════════════════════════════════════════════════════════
+function renderProductStats(products) {
+  const totalSpent = products.reduce((s,p)=>s+p.total_spent, 0);
+  const totalBuys  = products.reduce((s,p)=>s+p.purchase_count, 0);
+  document.getElementById('productStats').innerHTML = [
+    {val:products.length,    label:'Einzigartige Artikel', color:'text-[#003882]'},
+    {val:totalBuys,          label:'Käufe gesamt',          color:'text-purple-600'},
+    {val:fmt(totalSpent),    label:'Gesamtausgaben',        color:'text-green-600'},
+  ].map(c=>`
+    <div class="bg-white rounded-2xl p-4 shadow-sm text-center">
+      <div class="text-lg font-bold ${c.color}">${c.val}</div>
+      <div class="text-xs text-gray-400 mt-0.5">${c.label}</div>
+    </div>`).join('');
+}
 
 function filterProducts() {
-  const q = document.getElementById('productSearch').value.toLowerCase();
-  const sort = document.getElementById('productSort').value;
+  const q      = document.getElementById('productSearch').value.toLowerCase();
+  const sort   = document.getElementById('productSort').value;
+  const trend  = document.getElementById('productTrend').value;
+  const period = parseInt(document.getElementById('productPeriod').value)||0;
+  const cutoff = period ? new Date(Date.now()-period*864e5).toISOString().slice(0,10) : '';
 
-  let filtered = allProducts.filter(p => !q || p.name.toLowerCase().includes(q));
+  let filtered = allProducts.filter(p => {
+    if (q && !p.name.toLowerCase().includes(q)) return false;
+    if (trend && getPriceTrend(p) !== trend) return false;
+    if (cutoff && (p.last_date||'').slice(0,10) < cutoff) return false;
+    return true;
+  });
 
-  filtered.sort((a, b) => {
-    if (sort === 'count-desc') return b.purchase_count - a.purchase_count;
-    if (sort === 'spent-desc') return b.total_spent - a.total_spent;
-    if (sort === 'name-asc')   return a.name.localeCompare(b.name, 'de');
-    if (sort === 'last-desc')  return (b.last_date || '').localeCompare(a.last_date || '');
+  filtered.sort((a,b) => {
+    if (sort==='count-desc') return b.purchase_count - a.purchase_count;
+    if (sort==='spent-desc') return b.total_spent - a.total_spent;
+    if (sort==='name-asc')   return a.name.localeCompare(b.name,'de');
+    if (sort==='last-desc')  return (b.last_date||'').localeCompare(a.last_date||'');
+    if (sort==='price-desc') return b.last_price - a.last_price;
+    if (sort==='price-asc')  return a.last_price - b.last_price;
     return 0;
   });
 
+  document.getElementById('productCount').textContent =
+    `${filtered.length} von ${allProducts.length} Artikeln`;
   renderProducts(filtered);
-}
-
-function renderProductStats(products) {
-  const total = products.reduce((s, p) => s + p.total_spent, 0);
-  const totalQty = products.reduce((s, p) => s + p.purchase_count, 0);
-  document.getElementById('productStats').innerHTML = `
-    <div class="stat-card"><div class="value">${products.length}</div><div class="label">Einzigartige Artikel</div></div>
-    <div class="stat-card"><div class="value">${totalQty}</div><div class="label">Käufe gesamt</div></div>
-    <div class="stat-card"><div class="value">${total.toFixed(2)} €</div><div class="label">Gesamtausgaben</div></div>
-  `;
 }
 
 function renderProducts(products) {
   const el = document.getElementById('productGrid');
   if (!products.length) {
-    el.innerHTML = '<div class="empty">Keine Artikel gefunden.</div>';
+    el.className = 'text-center py-16 text-gray-400';
+    el.innerHTML = 'Keine Artikel gefunden.';
     return;
   }
-
-  el.className = 'product-grid';
+  el.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3';
   el.innerHTML = products.map(p => {
-    const lastDate = p.last_date ? new Date(p.last_date).toLocaleDateString('de-DE') : '–';
+    const trend = getPriceTrend(p);
+    const trendBadge = trend==='up'
+      ? '<span class="text-[11px] bg-red-100 text-red-600 rounded-full px-2 py-0.5 font-semibold">↑ teurer</span>'
+      : trend==='down'
+      ? '<span class="text-[11px] bg-green-100 text-green-600 rounded-full px-2 py-0.5 font-semibold">↓ günstiger</span>'
+      : '';
     return `
-      <div class="product-card" onclick="showProductDetail('${esc(p.id)}')">
-        <div class="product-name">${esc(p.name || p.id)}</div>
-        <div class="product-stats">
-          <div class="stat-item">
-            <div class="stat-label">Käufe</div>
-            <div class="stat-value">${p.purchase_count}×</div>
+      <div class="bg-white rounded-2xl p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+           onclick="showProductDetail('${p.id.replace(/'/g,"\\'")}')">
+        <div class="font-semibold text-gray-800 leading-tight line-clamp-2 mb-2" style="min-height:2.6em">
+          ${esc(p.name||p.id)}
+        </div>
+        ${trendBadge?`<div class="mb-2.5">${trendBadge}</div>`:'<div class="mb-2.5 h-5"></div>'}
+        <div class="grid grid-cols-2 gap-1.5 text-center">
+          <div class="bg-gray-50 rounded-xl py-2">
+            <div class="text-base font-bold text-[#003882]">${p.purchase_count}×</div>
+            <div class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Käufe</div>
           </div>
-          <div class="stat-item">
-            <div class="stat-label">Akt. Preis</div>
-            <div class="stat-value">${p.last_price.toFixed(2)} €</div>
+          <div class="bg-gray-50 rounded-xl py-2">
+            <div class="text-base font-bold text-green-600">${p.last_price.toFixed(2)} €</div>
+            <div class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Akt. Preis</div>
           </div>
-          <div class="stat-item">
-            <div class="stat-label">Ausgaben</div>
-            <div class="stat-value">${p.total_spent.toFixed(2)} €</div>
+          <div class="bg-gray-50 rounded-xl py-2">
+            <div class="text-base font-bold text-gray-700">${p.avg_price.toFixed(2)} €</div>
+            <div class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Ø Preis</div>
           </div>
-          <div class="stat-item">
-            <div class="stat-label">Zuletzt</div>
-            <div class="stat-value" style="font-size:13px">${lastDate}</div>
+          <div class="bg-gray-50 rounded-xl py-2">
+            <div class="text-base font-bold text-gray-700">${p.total_spent.toFixed(2)} €</div>
+            <div class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Gesamt</div>
           </div>
         </div>
+        <div class="mt-2.5 text-xs text-gray-400 text-center">${fmtDate(p.last_date)}</div>
       </div>`;
   }).join('');
 }
 
+// ── Produkt-Detail Modal ──────────────────────────────────────────────────────
 function showProductDetail(id) {
   const p = allProducts.find(x => x.id === id);
   if (!p) return;
 
-  const lastDate = p.last_date ? new Date(p.last_date).toLocaleString('de-DE') : '–';
-  const priceHistory = (p.price_history || []).slice().reverse();
+  if (chartModal) { chartModal.destroy(); chartModal = null; }
 
-  const historyRows = priceHistory.map(h => {
-    const d = h.date ? new Date(h.date).toLocaleDateString('de-DE') : '–';
-    return `<div class="price-history-item">
-      <span>${d}</span>
-      <span style="color:#6b7280">${esc(h.store || '')}</span>
-      <strong>${parseFloat(h.price).toFixed(2)} €</strong>
-    </div>`;
-  }).join('') || '<div style="color:#9ca3af;padding:8px 0">Keine Preishistorie</div>';
+  const trend = getPriceTrend(p);
+  const trendLabel = trend==='up' ? ' ↑ teurer' : trend==='down' ? ' ↓ günstiger' : '';
+  const trendColor = trend==='up' ? 'text-red-500' : trend==='down' ? 'text-green-500' : 'text-gray-500';
 
   document.getElementById('modalTitle').textContent = p.name || p.id;
-  document.getElementById('modalContent').innerHTML = `
-    <div class="product-stats" style="margin-bottom:16px">
-      <div class="stat-item"><div class="stat-label">Käufe gesamt</div><div class="stat-value">${p.purchase_count}×</div></div>
-      <div class="stat-item"><div class="stat-label">Menge gesamt</div><div class="stat-value">${p.total_quantity}</div></div>
-      <div class="stat-item"><div class="stat-label">Ausgaben gesamt</div><div class="stat-value">${p.total_spent.toFixed(2)} €</div></div>
-      <div class="stat-item"><div class="stat-label">Ø Preis</div><div class="stat-value">${p.avg_price.toFixed(2)} €</div></div>
-      <div class="stat-item"><div class="stat-label">Aktueller Preis</div><div class="stat-value">${p.last_price.toFixed(2)} €</div></div>
-      <div class="stat-item"><div class="stat-label">Zuletzt gekauft</div><div class="stat-value" style="font-size:13px">${lastDate}</div></div>
-      <div class="stat-item"><div class="stat-label">Filiale</div><div class="stat-value" style="font-size:13px">${esc(p.last_store || '–')}</div></div>
-    </div>
-    <h3 style="font-size:14px;color:#6b7280;margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Preishistorie</h3>
-    ${historyRows}
-  `;
+
+  document.getElementById('modalStats').innerHTML = [
+    {label:'Käufe gesamt',    val:p.purchase_count+'×'},
+    {label:'Menge gesamt',    val:p.total_quantity},
+    {label:'Ausgaben gesamt', val:fmt(p.total_spent)},
+    {label:'Ø Preis',         val:fmt(p.avg_price)},
+    {label:'Akt. Preis',      val:`<span class="font-bold ${trendColor}">${fmt(p.last_price)}${trendLabel}</span>`},
+    {label:'Zuletzt',         val:fmtDate(p.last_date)},
+  ].map(s=>`
+    <div class="bg-gray-50 rounded-xl p-2.5 text-center">
+      <div class="text-[10px] text-gray-400 uppercase tracking-wide">${s.label}</div>
+      <div class="font-semibold text-gray-800 mt-0.5 text-sm">${s.val}</div>
+    </div>`).join('');
+
+  const hist = (p.price_history||[]).filter(h=>h.price>0);
+  const wrapper = document.getElementById('modalChartWrapper');
+
+  if (hist.length > 1) {
+    wrapper.style.display = 'block';
+    chartModal = new Chart(document.getElementById('modalPriceChart'), {
+      type:'line',
+      data:{
+        labels: hist.map(h=>fmtDate(h.date)),
+        datasets:[{
+          label:'Preis (€)',
+          data: hist.map(h=>parseFloat(h.price)),
+          borderColor:'#003882',
+          backgroundColor:'rgba(0,56,130,0.07)',
+          fill:true,
+          tension:0.35,
+          pointRadius:4,
+          pointBackgroundColor:'#003882',
+          pointBorderColor:'#fff',
+          pointBorderWidth:2,
+        }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>` ${c.raw.toFixed(2)} €`}}},
+        scales:{
+          y:{ticks:{callback:v=>v.toFixed(2)+'€'}, grid:{color:'#f3f4f6'}},
+          x:{grid:{display:false}, ticks:{maxRotation:40, font:{size:11}}}
+        }
+      }
+    });
+  } else {
+    wrapper.style.display = 'none';
+  }
+
+  document.getElementById('modalHistory').innerHTML = hist.length
+    ? hist.slice().reverse().map(h=>`
+        <div class="flex justify-between items-center py-2.5 border-b border-gray-50 text-sm last:border-0">
+          <span class="text-gray-500 shrink-0">${fmtDate(h.date)}</span>
+          <span class="text-gray-400 text-xs truncate mx-3 flex-1">${esc(h.store||'')}</span>
+          <span class="font-semibold text-gray-800 shrink-0">${parseFloat(h.price).toFixed(2)} €</span>
+        </div>`).join('')
+    : '<p class="text-center py-4 text-gray-400 text-sm">Keine Preishistorie verfügbar</p>';
+
   document.getElementById('productModal').classList.add('open');
 }
 
 function closeModal(e) {
-  if (e.target === document.getElementById('productModal')) {
+  if (e.target.id === 'productModal') {
     document.getElementById('productModal').classList.remove('open');
+    if (chartModal) { chartModal.destroy(); chartModal = null; }
   }
 }
 
-function esc(str) {
-  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
 loadData();
-// Auto-refresh every 5 minutes
 setInterval(loadData, 5 * 60 * 1000);
 </script>
 </body>

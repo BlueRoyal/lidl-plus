@@ -14,6 +14,13 @@ from .const import (
     CONF_LANGUAGE,
     CONF_REFRESH_TOKEN,
     DOMAIN,
+    KEY_AVERAGE_BASKET,
+    KEY_CATEGORY_FOOD_SPENDING,
+    KEY_CATEGORY_NONFOOD_SPENDING,
+    KEY_CURRENT_MONTH_SPENDING,
+    KEY_SPENDING_BY_MONTH,
+    KEY_SPENDING_BY_STORE,
+    KEY_TOTAL_TICKETS,
     SERVICE_ACTIVATE_ALL_COUPONS,
     SERVICE_SYNC,
 )
@@ -45,6 +52,13 @@ async def _write_panel_data(hass: HomeAssistant, coordinator: LidlPlusCoordinato
         ],
         "products": data.get("products", []),
         "last_sync": data.get("last_sync", ""),
+        "spending_by_month": data.get(KEY_SPENDING_BY_MONTH, {}),
+        "spending_by_store": data.get(KEY_SPENDING_BY_STORE, {}),
+        "food_total": data.get(KEY_CATEGORY_FOOD_SPENDING, 0),
+        "nonfood_total": data.get(KEY_CATEGORY_NONFOOD_SPENDING, 0),
+        "total_tickets": data.get(KEY_TOTAL_TICKETS, 0),
+        "avg_basket": data.get(KEY_AVERAGE_BASKET, 0),
+        "current_month": data.get(KEY_CURRENT_MONTH_SPENDING, 0),
     }
 
     www_path = hass.config.path(_WWW_DIR)

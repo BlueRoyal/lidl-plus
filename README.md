@@ -1,14 +1,19 @@
-**This python package is unofficial and is not related in any way to Lidl. It was developed by reversed engineered requests and can stop working at anytime!**
+**This project is unofficial and is not related in any way to Lidl. It was developed by reversed engineered requests and can stop working at anytime!**
 
-# Python Lidl Plus API
+# Lidl Plus — Python API & Home Assistant Integration
+
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Andre0512/lidl-plus/python-check.yml?branch=main&label=checks)](https://github.com/Andre0512/lidl-plus/actions/workflows/python-check.yml)
 [![PyPI - Status](https://img.shields.io/pypi/status/lidl-plus)](https://pypi.org/project/lidl-plus)
 [![PyPI](https://img.shields.io/pypi/v/lidl-plus?color=blue)](https://pypi.org/project/lidl-plus)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/lidl-plus)](https://www.python.org/)
 [![PyPI - License](https://img.shields.io/pypi/l/lidl-plus)](https://github.com/Andre0512/lidl-plus/blob/main/LICENCE)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/lidl-plus)](https://pypistats.org/packages/lidl-plus)
+[![HA Integration](https://img.shields.io/badge/Home%20Assistant-Integration-41BDF5?logo=homeassistant)](custom_components/lidl_plus)
 
-Fetch receipts, analytics and more from Lidl Plus.
+This repository provides two things:
+
+- **Python library & CLI** — fetch receipts, analytics and coupons from the Lidl Plus API
+- **Home Assistant custom integration** — 20+ sensors, a sidebar panel with charts, receipt browser and product tracker
 
 ## Installation
 ```bash
@@ -178,16 +183,55 @@ commands:
 
 ## Home Assistant Integration
 
-Use `sync` on a schedule to keep the cache up to date, then read `stats` or the cache JSON directly as a sensor:
+A fully featured Home Assistant custom integration is included in `custom_components/lidl_plus/`.
 
-```bash
-# Run daily via cron or HA shell command
-lidl-plus -c DE -l de -r "TOKEN" --cache /config/lidlplus_cache.json sync
-```
+### Features
+- **20+ sensors**: spending by month, average basket, food/non-food categories, coupons, price changes, restock suggestions, last receipt, loyalty ID, and more
+- **Sidebar panel** with three tabs:
+  - **Übersicht**: KPI cards, monthly spending bar chart, food/non-food donut chart, top stores chart
+  - **Kassenbons**: all receipts with full item details, filter by store, date range, amount
+  - **Artikel**: all products with purchase stats, price trend badges, filter by trend/period, detail modal with price history line chart
+- **Services**: `lidl_plus.sync` (force refresh), `lidl_plus.activate_all_coupons`
+- Data auto-refreshes every 6 hours; panel updates on each sync
 
-The cache file is plain JSON and can be read by HA's `rest` or `file` sensor integrations.
+### Setup
+1. Copy `custom_components/lidl_plus/` to your HA `/config/custom_components/` directory
+2. Copy `www/lidl_plus/` to your HA `/config/www/` directory
+3. Add to `configuration.yaml`:
+   ```yaml
+   panel_custom:
+     - name: lidl-plus-panel-element
+       sidebar_title: Lidl Plus
+       sidebar_icon: mdi:cart
+       url_path: lidl-plus
+       module_url: /local/lidl_plus/panel.js
+   ```
+4. Restart Home Assistant
+5. Go to **Settings → Devices & Services → Add Integration** and search for *Lidl Plus*
+6. Enter your refresh token (obtain via `lidl-plus auth` CLI command)
 
 ## Changelog
+
+### 1.1.0 — 2026-04-02
+**Home Assistant integration overhaul**
+- Redesigned panel UI with Tailwind CSS and Chart.js
+- Added **Übersicht** tab: monthly bar chart, food/non-food donut chart, top-stores horizontal bar chart
+- Added price trend indicators (↑↓→) on product cards and in detail modal
+- Added price history **line chart** in product detail modal
+- Added advanced filters: store dropdown, date range, min/max amount (receipts); trend filter, period filter (articles)
+- Fixed `sensor.lidl_plus_last_sync` and `sensor.lidl_plus_letzter_einkauf`: now return proper `datetime` objects (HA 2026 compatibility)
+- Fixed state class warnings for monetary sensors (now use `SensorStateClass.TOTAL`)
+- Extended `data.json` with `spending_by_month`, `spending_by_store`, `food_total`, `nonfood_total`, `avg_basket`, `current_month`
+- Fixed panel registration for HA 2026.x (`async_register_panel` removed; now via `panel_custom` in `configuration.yaml`)
+- Added `frontend` dependency to `manifest.json`
+
+### 1.0.0
+- Initial Home Assistant custom integration
+- 19 sensor entities (spending, coupons, price changes, restock suggestions, receipts, products, log, etc.)
+- Vendored `_lidlplus` API (no Selenium required in HA environment)
+- Panel with receipt browser and product tracker
+- Services: `sync`, `activate_all_coupons`
+- Fix: German decimal quantities (`1,19`) parsed correctly as float
 
 ### 0.4.0
 - Fixed Python 3.14 compatibility (`argparse`, `blinker`, `setuptools`)
