@@ -42,17 +42,22 @@ def get_arguments():
         action="store_true",
     )
     parser.add_argument("-d", "--debug", help="debug mode", action="store_true")
+    parser.add_argument("--cache", metavar="FILE", help="path to cache file (e.g. lidlplus_cache.json)")
     subparser = parser.add_subparsers(title="commands", metavar="command", required=True)
     auth = subparser.add_parser("auth", help="authenticate and get token")
-    auth.add_argument("auth", help="authenticate and print refresh_token", action="store_true")
+    auth.set_defaults(auth=True)
     loyalty_id = subparser.add_parser("id", help="show loyalty ID")
-    loyalty_id.add_argument("id", help="show loyalty ID", action="store_true")
+    loyalty_id.set_defaults(id=True)
     receipt = subparser.add_parser("receipt", help="output last receipts as json")
-    receipt.add_argument("receipt", help="output last receipts as json", action="store_true")
+    receipt.set_defaults(receipt=True)
     receipt.add_argument("-a", "--all", help="fetch all receipts", action="store_true")
     coupon = subparser.add_parser("coupon", help="activate coupons")
-    coupon.add_argument("coupon", help="output all coupons", action="store_true")
+    coupon.set_defaults(coupon=True)
     coupon.add_argument("-a", "--all", help="activate all coupons", action="store_true")
+    sync = subparser.add_parser("sync", help="sync new tickets to cache")
+    sync.set_defaults(sync=True)
+    stats = subparser.add_parser("stats", help="show analytics from cache")
+    stats.set_defaults(stats=True)
     return vars(parser.parse_args())
 
 
@@ -83,10 +88,10 @@ def lidl_plus_login(args):
     language = args.get("language") or input("Enter your language (de, en, ...): ")
     country = args.get("country") or input("Enter your country (DE, AT, ...): ")
     if args.get("refresh_token"):
-        return LidlPlusApi(language, country, args.get("refresh_token"))
+        return LidlPlusApi(language, country, args.get("refresh_token"), cache_file=args.get("cache"))
     username = args.get("user") or input("Enter your lidl plus username (phone number): ")
     password = args.get("password") or getpass("Enter your lidl plus password: ")
-    lidl_plus = LidlPlusApi(language, country)
+    lidl_plus = LidlPlusApi(language, country, cache_file=args.get("cache"))
     try:
         text = f"Enter the verify code you received via {args['2fa']}: "
         lidl_plus.login(
@@ -168,6 +173,35 @@ def activate_coupons(args):
     print(f"Activated {i} coupons")
 
 
+def sync_cache(args):
+    """Sync new tickets to cache"""
+    if not args.get("cache"):
+        print("Error: --cache FILE is required for sync")
+        sys.exit(1)
+    lidl_plus = lidl_plus_login(args)
+    print("Syncing tickets...")
+    new_count = lidl_plus.sync()
+    print(f"Done. {new_count} new ticket(s) added to cache.")
+
+
+def print_stats(args):
+    """Print analytics from cache"""
+    if not args.get("cache"):
+        print("Error: --cache FILE is required for stats")
+        sys.exit(1)
+    lidl_plus = lidl_plus_login(args)
+    stats = {
+        "current_month_spending": lidl_plus.current_month_spending(),
+        "average_basket": lidl_plus.average_basket(),
+        "shopping_frequency_days": lidl_plus.shopping_frequency_days(),
+        "spending_by_month": lidl_plus.spending_by_month(),
+        "spending_by_store": lidl_plus.spending_by_store(),
+        "frequently_bought_top10": lidl_plus.frequently_bought(10),
+        "restock_suggestions": lidl_plus.restock_suggestions(),
+    }
+    print(json.dumps(stats, indent=4, ensure_ascii=False))
+
+
 def main():
     """argument commands"""
     args = get_arguments()
@@ -179,6 +213,10 @@ def main():
         print_tickets(args)
     elif args.get("coupon"):
         activate_coupons(args)
+    elif args.get("sync"):
+        sync_cache(args)
+    elif args.get("stats"):
+        print_stats(args)
 
 
 def start():

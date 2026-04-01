@@ -7,38 +7,34 @@
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/lidl-plus)](https://www.python.org/)
 [![PyPI - License](https://img.shields.io/pypi/l/lidl-plus)](https://github.com/Andre0512/lidl-plus/blob/main/LICENCE)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/lidl-plus)](https://pypistats.org/packages/lidl-plus)
-[![Buy Me a Coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-donate-orange.svg)](https://www.buymeacoffee.com/andre0512)  
 
+Fetch receipts, analytics and more from Lidl Plus.
 
-Fetch receipts and more from Lidl Plus.
 ## Installation
 ```bash
-pip install lidl-plus
+pip install "lidl-plus[auth]"
+```
+
+### Python 3.14 compatibility
+Python 3.14 requires specific package versions:
+```bash
+pip install "setuptools==71.0.4" "blinker==1.5"
 ```
 
 ## Authentication
-To login in Lidl Plus we need to simulate the app login.
-This is a bit complicated, we need a web browser and some additional python packages.
-After we have received the token once, we can use it for further requestes and we don't need a browser anymore.
+To log in to Lidl Plus we simulate the app login using a browser. After receiving the token once, it can be reused without a browser.
 
 #### Prerequisites
-* Check you have installed one of the supported web browser
-  - Chromium
-  - Google Chrome
+* One of the supported browsers installed:
+  - Google Chrome / Chromium / Microsoft Edge
   - Mozilla Firefox
-  - Microsoft Edge
-* Install additional python packages
-  ```bash
-  pip install "lidl-plus[auth]"
-  ```
+* Additional packages: `pip install "lidl-plus[auth]"`
+
 #### Commandline-Tool
 ```bash
-$ lidl-plus auth
-Enter your language (de, en, ...): de
-Enter your country (DE, AT, ...): AT
-Enter your lidl plus username (phone number): +4915784632296
+$ lidl-plus --language=de --country=DE --user=your@email.com auth
 Enter your lidl plus password:
-Enter the verify code you received via phone: 590287
+Enter the verify code you received via phone: 123456
 ------------------------- refresh token ------------------------
 2D4FC2A699AC703CAB8D017012658234917651203746021A4AA3F735C8A53B7F
 ----------------------------------------------------------------
@@ -48,122 +44,116 @@ Enter the verify code you received via phone: 590287
 ```python
 from lidlplus import LidlPlusApi
 
-lidl = LidlPlusApi(language="de", country="AT")
-lidl.login(phone="+4915784632296", password="password", verify_token_func=lambda: input("Insert code: "))
+lidl = LidlPlusApi(language="de", country="DE")
+lidl.login(email="your@email.com", password="password", verify_token_func=lambda: input("Insert code: "))
 print(lidl.refresh_token)
 ```
-## Usage
-Currently, the only features are fetching receipts and activating coupons
-### Receipts
 
-Get your receipts as json and receive a list of bought items like:
-```json
-{
-    "currentUnitPrice": "2,19",
-    "quantity": "1",
-    "isWeight": false,
-    "originalAmount": "2,19",
-    "name": "Vegane Frikadellen",
-    "taxGroup": "1",
-    "taxGroupName": "A",
-    "codeInput": "4023456245134",
-    "discounts": [
-        {
-            "description": "5€ Coupon",
-            "amount": "0,21"
-        }
-    ],
-    "deposit": null,
-    "giftSerialNumber": null
-},
-```
+## Usage
+
+### Receipts
 
 #### Commandline-Tool
 ```bash
-$ lidl-plus --language=de --country=AT --refresh-token=XXXXX receipt --all > data.json
+# Last receipt
+lidl-plus --language=de --country=DE --refresh-token=XXXXX receipt
+
+# All receipts
+lidl-plus --language=de --country=DE --refresh-token=XXXXX receipt --all
 ```
 
 #### Python
 ```python
 from lidlplus import LidlPlusApi
 
-lidl = LidlPlusApi("de", "AT", refresh_token="XXXXXXXXXX")
+lidl = LidlPlusApi("de", "DE", refresh_token="XXXXXXXXXX")
+
+# List of receipts (metadata only)
 for receipt in lidl.tickets():
-    pprint(lidl.ticket(receipt["id"]))
+    print(receipt["id"], receipt["date"], receipt["totalAmount"])
+
+# Full receipt detail
+ticket = lidl.ticket("TICKET_ID")
+
+# Parse items as structured list
+items = lidl.parse_ticket_items(ticket)
+# [{"id": "0082052", "name": "Feldsalat", "unit_price": "1,49", "quantity": 1, "tax_type": "A"}, ...]
+```
+
+### Cache & Analytics
+
+Sync tickets locally for fast analytics without repeated API calls:
+
+#### Commandline-Tool
+```bash
+# Sync new tickets to cache (only fetches new ones on subsequent runs)
+lidl-plus --language=de --country=DE --refresh-token=XXXXX --cache lidlplus_cache.json sync
+
+# Show analytics
+lidl-plus --language=de --country=DE --refresh-token=XXXXX --cache lidlplus_cache.json stats
+```
+
+#### Python
+```python
+from lidlplus import LidlPlusApi
+
+lidl = LidlPlusApi("de", "DE", refresh_token="XXXXXXXXXX", cache_file="lidlplus_cache.json")
+
+# Sync only new tickets (fast after first run)
+new_count = lidl.sync()
+
+# All items across all receipts (flat list with date + store)
+items = lidl.all_ticket_items()
+
+# Price history for a specific article id
+history = lidl.price_history("0082052")
+
+# Top 10 most frequently bought items
+top = lidl.frequently_bought(limit=10)
+
+# Spending grouped by month {"2026-03": 142.50, ...}
+by_month = lidl.spending_by_month()
+
+# Spending grouped by store
+by_store = lidl.spending_by_store()
+
+# When was an item last bought
+last = lidl.last_seen("0082052")
+
+# Current month spending
+this_month = lidl.current_month_spending()
+
+# Average basket value
+avg = lidl.average_basket()
+
+# Average days between shopping trips
+freq = lidl.shopping_frequency_days()
+
+# Items overdue for restocking (based on average purchase interval)
+restock = lidl.restock_suggestions(min_purchases=3)
 ```
 
 ### Coupons
 
-You can list all coupons and activate/deactivate them by id
-```json
-{
-    "sections": [
-        {
-            "name": "FavoriteStore",
-            "coupons": []
-        },
-        {
-            "name": "AllStores",
-            "coupons": [
-                {
-                    "id": "2c9b3554-a09c-412c-8be4-d41cbff13572",
-                    "image": "https://lidlplusprod.blob.core.windows.net/images/coupons/LT/IDISC0000254911.png?t=1695452076",
-                    "type": "Standard",
-                    "offerTitle": "1 + 1",
-                    "title": "👨🏻‍🍳 Frozen 👨🏻‍🍳",
-                    "offerDescriptionShort": "FREE",
-                    "isSegmented": false,
-                    "startValidityDate": "2023-09-24T21:00:00Z",
-                    "endValidityDate": "2023-10-01T20:59:59Z",
-                    "isActivated": false,
-                    "apologizeText": "Xxxxxxxxxxxxxxxxx",
-                    "apologizeStatus": false,
-                    "apologizeTitle": "Xxxxxxxxxxxxxxxxxxx",
-                    "promotionId": "DISC0000254911",
-                    "tagSpecial": "",
-                    "firstColor": "#ffc700",
-                    "secondaryColor": null,
-                    "firstFontColor": "#4a4a4a",
-                    "secondaryFontColor": null,
-                    "isSpecial": false,
-                    "hasAsterisk": false,
-                    "isHappyHour": false,
-                    "stores": []
-                },
-                .......
-            ]
-        },
-        {
-            "name": "OtherStores",
-            "coupons": []
-        }
-    ]
-}
-```
-
-#### Commandline-Tool
-
-Activate all available coupons
-
 ```bash
-$ lidl-plus --language=de --country=AT --refresh-token=XXXXX coupon --all
+# List all coupons
+lidl-plus --language=de --country=DE --refresh-token=XXXXX coupon
+
+# Activate all available coupons
+lidl-plus --language=de --country=DE --refresh-token=XXXXX coupon --all
 ```
 
-#### Python
 ```python
 from lidlplus import LidlPlusApi
 
-lidl = LidlPlusApi("de", "AT", refresh_token="XXXXXXXXXX")
+lidl = LidlPlusApi("de", "DE", refresh_token="XXXXXXXXXX")
 for section in lidl.coupons()["sections"]:
-  for coupon in section["coupons"]:
-    print("found coupon: ", coupon["title"], coupon["id"])
+    for coupon in section["coupons"]:
+        print(coupon["title"], coupon["id"])
 ```
 
-## Help
-#### Commandline-Tool
-```commandline
-Lidl Plus API
-
+## CLI Reference
+```
 options:
   -h, --help                show this help message and exit
   -c CC, --country CC       country (DE, BE, NL, AT, ...)
@@ -173,19 +163,44 @@ options:
   --2fa {phone,email}       choose two factor auth method
   -r TOKEN, --refresh-token TOKEN
                             refresh token to authenticate
+  --cache FILE              path to local cache file (JSON)
   --skip-verify             skip ssl verification
   --not-accept-legal-terms  not auto accept legal terms updates
-  -d, --debug               debug mode
+  -d, --debug               debug mode (shows browser window)
 
 commands:
-  auth                      authenticate and get token
-  receipt                   output last receipts as json
-  coupon                    activate coupons
+  auth                      authenticate and get refresh token
+  id                        show loyalty ID
+  receipt                   output last receipt as json
+  coupon                    list or activate coupons
+  sync                      sync new tickets to cache (requires --cache)
+  stats                     show analytics from cache (requires --cache)
 ```
 
-## Support
-If you find this project helpful and would like to support its development, you can buy me a coffee! ☕
+## Home Assistant Integration
 
-[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/andre0512)
+Use `sync` on a schedule to keep the cache up to date, then read `stats` or the cache JSON directly as a sensor:
 
-Don't forget to star the repository if you found it useful! ⭐
+```bash
+# Run daily via cron or HA shell command
+lidl-plus -c DE -l de -r "TOKEN" --cache /config/lidlplus_cache.json sync
+```
+
+The cache file is plain JSON and can be read by HA's `rest` or `file` sensor integrations.
+
+## Changelog
+
+### 0.4.0
+- Fixed Python 3.14 compatibility (`argparse`, `blinker`, `setuptools`)
+- Updated ticket detail endpoint to API v3
+- Updated login flow for new Lidl accounts page
+- Added `parse_ticket_items()` — extract structured items from HTML receipt
+- Added cache system (`cache_file` parameter, `sync()`, `cached_tickets()`)
+- Added analytics: `all_ticket_items()`, `price_history()`, `frequently_bought()`,
+  `spending_by_month()`, `spending_by_store()`, `last_seen()`,
+  `current_month_spending()`, `average_basket()`, `shopping_frequency_days()`,
+  `restock_suggestions()`
+- Added CLI commands: `sync`, `stats`
+
+### 0.3.5
+- Initial public release

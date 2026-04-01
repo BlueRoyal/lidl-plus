@@ -4,8 +4,11 @@ Lidl Plus api
 
 import base64
 import html
+import json
 import logging
+import os
 import re
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 import requests
@@ -40,14 +43,15 @@ class LidlPlusApi:
     _CLIENT_ID = "LidlPlusNativeClient"
     _AUTH_API = "https://accounts.lidl.com"
     _TICKET_API = "https://tickets.lidlplus.com/api/v2"
+    _TICKET_DETAIL_API = "https://tickets.lidlplus.com/api/v3"
     _COUPONS_API = "https://coupons.lidlplus.com/api"
     _COUPONS_V1_API = "https://coupons.lidlplus.com/app/api/"
     _PROFILE_API = "https://profile.lidlplus.com/profile/api"
     _APP = "com.lidlplus.app"
     _OS = "iOs"
-    _TIMEOUT = 10
+    _TIMEOUT = 120
 
-    def __init__(self, language, country, refresh_token=""):
+    def __init__(self, language, country, refresh_token="", cache_file=None):
         self._login_url = ""
         self._code_verifier = ""
         self._refresh_token = refresh_token
@@ -55,6 +59,7 @@ class LidlPlusApi:
         self._token = ""
         self._country = country.upper()
         self._language = language.lower()
+        self._cache_file = cache_file
 
     @property
     def refresh_token(self):
@@ -202,7 +207,7 @@ class LidlPlusApi:
         if verify_mode not in ["phone", "email"]:
             raise ValueError(f'Unknown 2fa-mode "{verify_mode}" - Only "phone" or "email" supported')
         response = browser.wait_for_request(f"{self._AUTH_API}/Account/Login.*", 10).response
-        if "/connect/authorize/callback" not in response.headers.get("Location"):
+        if "/connect/authorize/callback" not in (response.headers.get("Location") or ""):
             element = wait.until(expected_conditions.visibility_of_element_located((By.CLASS_NAME, verify_mode)))
             element.find_element(By.TAG_NAME, "button").click()
             verify_code = verify_token_func()
@@ -237,7 +242,7 @@ class LidlPlusApi:
             raise MissingLogin("You need to login!")
         return {
             "Authorization": f"Bearer {self._token}",
-            "App-Version": "999.99.9",
+            "App-Version": "16.46.4",
             "Operating-System": self._OS,
             "App": "com.lidl.eci.lidl.plus",
             "Accept-Language": self._language,
@@ -263,8 +268,177 @@ class LidlPlusApi:
     def ticket(self, ticket_id):
         """Get full data of single ticket by id"""
         kwargs = {"headers": self._default_headers(), "timeout": self._TIMEOUT}
-        url = f"{self._TICKET_API}/{self._country}/tickets"
+        url = f"{self._TICKET_DETAIL_API}/{self._country}/tickets"
         return requests.get(f"{url}/{ticket_id}", **kwargs).json()
+
+    @staticmethod
+    def parse_ticket_items(ticket):
+        """Parse HTML receipt from ticket and return items as structured list"""
+        from html.parser import HTMLParser
+
+        class _Parser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self._seen = set()
+                self.items = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag != "span":
+                    return
+                a = dict(attrs)
+                span_id = a.get("id", "")
+                if span_id in self._seen:
+                    return
+                if "article" in a.get("class", "").split() and a.get("data-art-id"):
+                    self._seen.add(span_id)
+                    self.items.append({
+                        "id": a["data-art-id"],
+                        "name": a.get("data-art-description", ""),
+                        "unit_price": a.get("data-unit-price", ""),
+                        "quantity": int(a.get("data-art-quantity", "1")),
+                        "tax_type": a.get("data-tax-type", ""),
+                    })
+
+        p = _Parser()
+        p.feed(ticket.get("htmlPrintedReceipt", ""))
+        return p.items
+
+    # --- Cache ---
+
+    def _load_cache(self):
+        if not self._cache_file or not os.path.exists(self._cache_file):
+            return {"tickets": {}}
+        with open(self._cache_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def _save_cache(self, cache):
+        if not self._cache_file:
+            return
+        with open(self._cache_file, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+
+    def sync(self):
+        """Fetch only new tickets and add them to the cache. Returns count of new tickets."""
+        cache = self._load_cache()
+        cached_ids = set(cache["tickets"].keys())
+        all_refs = self.tickets()
+        new_refs = [t for t in all_refs if t["id"] not in cached_ids]
+        for ref in new_refs:
+            ticket = self.ticket(ref["id"])
+            ticket["_items"] = self.parse_ticket_items(ticket)
+            cache["tickets"][ref["id"]] = ticket
+        cache["last_updated"] = datetime.utcnow().isoformat()
+        self._save_cache(cache)
+        return len(new_refs)
+
+    def cached_tickets(self):
+        """Return all tickets from cache as list."""
+        return list(self._load_cache()["tickets"].values())
+
+    # --- Analytics ---
+
+    @staticmethod
+    def _parse_date(date_str):
+        return datetime.fromisoformat(date_str.split("+")[0].split("Z")[0])
+
+    def all_ticket_items(self):
+        """All items across all tickets as flat list with date and store."""
+        result = []
+        for ticket in self.cached_tickets():
+            date = ticket.get("date", "")
+            store = ticket.get("store", {}).get("name", "")
+            ticket_id = ticket.get("id", "")
+            for item in ticket.get("_items", []):
+                result.append({**item, "date": date, "store": store, "ticket_id": ticket_id})
+        return result
+
+    def price_history(self, item_id):
+        """Price changes for a specific item across all receipts."""
+        items = [i for i in self.all_ticket_items() if i["id"] == item_id]
+        return sorted(items, key=lambda x: x["date"])
+
+    def frequently_bought(self, limit=10):
+        """Top N most frequently bought items by total quantity."""
+        counts = Counter()
+        names = {}
+        for item in self.all_ticket_items():
+            counts[item["id"]] += item["quantity"]
+            names[item["id"]] = item["name"]
+        return [
+            {"id": iid, "name": names[iid], "total_quantity": qty}
+            for iid, qty in counts.most_common(limit)
+        ]
+
+    def spending_by_month(self):
+        """Total spending grouped by month (YYYY-MM)."""
+        result = defaultdict(float)
+        for ticket in self.cached_tickets():
+            month = ticket.get("date", "")[:7]
+            result[month] = round(result[month] + ticket.get("totalAmount", 0), 2)
+        return dict(sorted(result.items()))
+
+    def spending_by_store(self):
+        """Total spending grouped by store name."""
+        result = defaultdict(float)
+        for ticket in self.cached_tickets():
+            store = ticket.get("store", {}).get("name", "Unknown")
+            result[store] = round(result[store] + ticket.get("totalAmount", 0), 2)
+        return dict(sorted(result.items(), key=lambda x: x[1], reverse=True))
+
+    def last_seen(self, item_id):
+        """Last purchase info for a specific item id."""
+        items = [i for i in self.all_ticket_items() if i["id"] == item_id]
+        if not items:
+            return None
+        return max(items, key=lambda x: x["date"])
+
+    def current_month_spending(self):
+        """Total spending in the current calendar month."""
+        month = datetime.utcnow().strftime("%Y-%m")
+        return self.spending_by_month().get(month, 0.0)
+
+    def average_basket(self):
+        """Average total amount per shopping trip."""
+        tickets = self.cached_tickets()
+        if not tickets:
+            return 0.0
+        return round(sum(t.get("totalAmount", 0) for t in tickets) / len(tickets), 2)
+
+    def shopping_frequency_days(self):
+        """Average number of days between shopping trips."""
+        tickets = self.cached_tickets()
+        if len(tickets) < 2:
+            return None
+        dates = sorted(self._parse_date(t["date"]) for t in tickets)
+        gaps = [(dates[i + 1] - dates[i]).days for i in range(len(dates) - 1)]
+        return round(sum(gaps) / len(gaps), 1)
+
+    def restock_suggestions(self, min_purchases=3):
+        """Items overdue for restocking based on average purchase interval."""
+        item_dates = defaultdict(list)
+        item_names = {}
+        for item in self.all_ticket_items():
+            item_dates[item["id"]].append(item["date"])
+            item_names[item["id"]] = item["name"]
+        now = datetime.utcnow()
+        suggestions = []
+        for item_id, dates in item_dates.items():
+            if len(dates) < min_purchases:
+                continue
+            parsed = sorted(self._parse_date(d) for d in dates)
+            intervals = [(parsed[i + 1] - parsed[i]).days for i in range(len(parsed) - 1)]
+            avg_interval = sum(intervals) / len(intervals)
+            days_since_last = (now - parsed[-1]).days
+            overdue_by = days_since_last - avg_interval
+            if overdue_by > 0:
+                suggestions.append({
+                    "id": item_id,
+                    "name": item_names[item_id],
+                    "avg_interval_days": round(avg_interval, 1),
+                    "days_since_last": days_since_last,
+                    "overdue_by_days": round(overdue_by, 1),
+                })
+        return sorted(suggestions, key=lambda x: x["overdue_by_days"], reverse=True)
 
     def coupon_promotions_v1(self):
         """Get list of all coupons API V1"""
