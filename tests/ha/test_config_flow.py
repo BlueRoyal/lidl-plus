@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import requests
-from homeassistant.config_entries import SOURCE_USER, ConfigEntryState
+from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_RECONFIGURE, SOURCE_USER, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -97,13 +97,13 @@ async def test_user_flow_updates_token_of_configured_account(
 
 
 async def test_replaced_token_is_used_after_failed_validation(hass: HomeAssistant, api_state: FakeApiState) -> None:
-    # The token is renewed before the loyalty ID request fails because of the country
-    api_state.loyalty_error = http_error(404)
+    # The token is renewed before the receipts request fails because of the country
+    api_state.tickets_error = http_error(404)
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
     result = await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
     assert result["errors"] == {"base": "invalid_country"}
 
-    api_state.loyalty_error = None
+    api_state.tickets_error = None
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {**USER_INPUT, CONF_COUNTRY: "AT"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     # The entered token may be invalid after the first attempt, its replacement is used
@@ -186,7 +186,7 @@ async def test_reconfigure(hass: HomeAssistant, api_state: FakeApiState, config_
 async def test_reconfigure_keeps_replaced_token_after_error(
     hass: HomeAssistant, api_state: FakeApiState, config_entry: MockConfigEntry
 ) -> None:
-    api_state.loyalty_error = http_error(404)
+    api_state.tickets_error = http_error(404)
     result = await config_entry.start_reconfigure_flow(hass)
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_COUNTRY: "XX", CONF_LANGUAGE: "de"}
@@ -254,3 +254,37 @@ async def test_options_search_errors(
     result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_OFFER_STORES: []})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert config_entry.options == {CONF_OFFER_STORES: []}
+
+
+async def test_flows_without_loyalty_id(hass: HomeAssistant, api_state: FakeApiState) -> None:
+    """The loyalty endpoint fails for some accounts, a token must still be accepted"""
+    api_state.loyalty_error = http_error(404)
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    # Identified by country and language like the entries of older versions
+    entry = result["result"]
+    assert entry.unique_id == "DE_de"
+
+    # Adding it again only replaces the token
+    api_state.rotated_token = "rotated-2"
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
+    assert result["reason"] == "already_configured"
+    assert entry.data[CONF_REFRESH_TOKEN] == "rotated-2"
+
+    api_state.rotated_token = "rotated-3"
+    context = {"entry_id": entry.entry_id, "unique_id": entry.unique_id}
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_REAUTH, **context}, data=entry.data
+    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_REFRESH_TOKEN: "new-token"})
+    assert result["reason"] == "reauth_successful"
+    assert (entry.unique_id, entry.data[CONF_REFRESH_TOKEN]) == ("DE_de", "rotated-3")
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_RECONFIGURE, **context})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_COUNTRY: "DE", CONF_LANGUAGE: "de", CONF_REFRESH_TOKEN: "another-token"}
+    )
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.unique_id == "DE_de"

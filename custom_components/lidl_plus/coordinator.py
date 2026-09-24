@@ -167,6 +167,8 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._log_entries: deque[str] = deque(maxlen=LOG_LENGTH)
         # Refresh token that was last written to the config entry by this coordinator
         self._stored_token = api.refresh_token
+        # Why the loyalty ID could not be loaded, shown in the diagnostics
+        self.loyalty_error: str | None = None
 
     def _log(self, level: str, message: str) -> None:
         """Log to HA logger and keep entry in internal log."""
@@ -380,7 +382,11 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _fetch_loyalty_id(self) -> str | None:
         try:
-            return self.api.loyalty_id() or None
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("Could not fetch loyalty ID, keeping the previous one", exc_info=True)
+            loyalty_id = self.api.loyalty_id() or None
+        except Exception as exc:  # noqa: BLE001
+            # The loyalty endpoint fails for some accounts while everything else works
+            self.loyalty_error = str(exc) or type(exc).__name__
+            self._log("INFO", f"Loyalty-ID nicht verfügbar: {self.loyalty_error}")
             return (self.data or {}).get(KEY_LOYALTY_ID)
+        self.loyalty_error = None
+        return loyalty_id

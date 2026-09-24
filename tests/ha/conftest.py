@@ -69,7 +69,9 @@ class FakeApiState:
         self.loyalty_id = LOYALTY_ID
         # Raised by every call that needs a valid token
         self.error: Exception | None = None
-        # Raised by loyalty_id() after the token was renewed, e.g. for a wrong country
+        # Raised by account_id() after the token was renewed, e.g. for a wrong country
+        self.tickets_error: Exception | None = None
+        # Raised by loyalty_id(), the endpoint fails for some accounts
         self.loyalty_error: Exception | None = None
         # Raised by the public endpoints: offers, leaflets and store search
         self.public_error: Exception | None = None
@@ -198,6 +200,15 @@ class FakeLidlPlusApi:
         self._authenticate()
         if self._state.loyalty_error:
             raise self._state.loyalty_error
+        return self._state.loyalty_id
+
+    def account_id(self) -> str | None:
+        """Like LidlPlusApi.account_id: the receipts check login and country, the loyalty ID is optional"""
+        self._authenticate()
+        if self._state.tickets_error:
+            raise self._state.tickets_error
+        if self._state.loyalty_error:
+            return None
         return self._state.loyalty_id
 
     def activate_all_coupons(self) -> dict:

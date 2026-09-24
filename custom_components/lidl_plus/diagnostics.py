@@ -58,6 +58,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: LidlPlu
         "config": async_redact_data(dict(entry.data), TO_REDACT),
         "last_update_success": coordinator.last_update_success,
         "last_exception": repr(coordinator.last_exception) if coordinator.last_exception else None,
+        "loyalty_id_error": coordinator.loyalty_error,
         "summary": {key: data.get(key) for key in _SUMMARY_KEYS},
         "counts": {
             "receipts": len(receipts),

@@ -378,6 +378,7 @@ async def test_diagnostics(hass: HomeAssistant, api_state: FakeApiState, config_
     await setup_entry(hass, config_entry)
     diagnostics = await async_get_config_entry_diagnostics(hass, config_entry)
     assert diagnostics["config"][CONF_REFRESH_TOKEN] == "**REDACTED**"
+    assert diagnostics["loyalty_id_error"] is None
     assert diagnostics["counts"] == {
         "receipts": 3,
         "receipts_without_items": 0,
@@ -392,3 +393,19 @@ async def test_diagnostics(hass: HomeAssistant, api_state: FakeApiState, config_
     dump = json.dumps(diagnostics)
     for private in ("rotated-token", LOYALTY_ID, "Lidl Musterstadt", "Lidl Nord", '"t1"'):
         assert private not in dump
+
+
+async def test_account_without_loyalty_id(
+    hass: HomeAssistant, api_state: FakeApiState, config_entry: MockConfigEntry
+) -> None:
+    """The loyalty endpoint fails for some accounts, the receipts are loaded anyway"""
+    api_state.loyalty_error = requests.HTTPError("404 Client Error: Not Found")
+    await setup_entry(hass, config_entry)
+    assert config_entry.state is ConfigEntryState.LOADED
+    assert hass.states.get("sensor.lidl_plus_total_receipts").state == "3"
+    assert hass.states.get("sensor.lidl_plus_loyalty_id").state == STATE_UNKNOWN
+    assert hass.states.get("sensor.lidl_plus_last_error").state == "OK"
+    log = hass.states.get("sensor.lidl_plus_log").attributes["entries"]
+    assert any("Loyalty-ID nicht verfügbar: 404 Client Error" in line for line in log)
+    diagnostics = await async_get_config_entry_diagnostics(hass, config_entry)
+    assert diagnostics["loyalty_id_error"] == "404 Client Error: Not Found"

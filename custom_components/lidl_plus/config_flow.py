@@ -70,13 +70,14 @@ class LidlPlusConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _async_validate(
         self, country: str, language: str, entered_token: str, entry: ConfigEntry | None = None
     ) -> tuple[str | None, str, dict[str, str]]:
-        """Return account ID, current refresh token and form errors."""
+        """Return account ID (None if Lidl does not tell it), current refresh token and form errors."""
         token = self._replaced_tokens.get(entered_token, entered_token)
         api = LidlPlusApi(language=language, country=country, refresh_token=token)
         account_id: str | None = None
         errors: dict[str, str] = {}
         try:
-            account_id = await self.hass.async_add_executor_job(api.loyalty_id)
+            # Login and country are checked with the receipts, the loyalty ID is optional
+            account_id = await self.hass.async_add_executor_job(api.account_id)
         except (LoginError, MissingLogin):
             errors["base"] = "invalid_auth"
         except requests.HTTPError as exc:
@@ -92,9 +93,6 @@ class LidlPlusConfigFlow(ConfigFlow, domain=DOMAIN):
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Unexpected error while validating the Lidl Plus refresh token")
             errors["base"] = "unknown"
-        else:
-            if not account_id:
-                errors["base"] = "unknown"
 
         if api.refresh_token != token:
             self._replaced_tokens[entered_token] = api.refresh_token
@@ -130,7 +128,8 @@ class LidlPlusConfigFlow(ConfigFlow, domain=DOMAIN):
                 country, language, user_input[CONF_REFRESH_TOKEN].strip()
             )
             if not errors:
-                if entry := await self.async_set_unique_id(account_id):
+                # Without the loyalty ID the account is identified by country and language, like before 1.2.0
+                if entry := await self.async_set_unique_id(account_id or f"{country}_{language.lower()}"):
                     # Adding a configured account again replaces its token, also when its setup had failed
                     return self.async_update_reload_and_abort(
                         entry, data_updates={CONF_REFRESH_TOKEN: refresh_token}, reason="already_configured"
@@ -159,6 +158,9 @@ class LidlPlusConfigFlow(ConfigFlow, domain=DOMAIN):
                 entry.data[CONF_COUNTRY], entry.data[CONF_LANGUAGE], user_input[CONF_REFRESH_TOKEN].strip(), entry
             )
             if not errors:
+                if not account_id:
+                    # Without the loyalty ID the account of the token cannot be compared
+                    return self.async_update_reload_and_abort(entry, data_updates={CONF_REFRESH_TOKEN: refresh_token})
                 await self.async_set_unique_id(account_id)
                 self._abort_if_other_account(entry, account_id)
                 return self.async_update_reload_and_abort(
@@ -182,13 +184,13 @@ class LidlPlusConfigFlow(ConfigFlow, domain=DOMAIN):
             token = (user_input.get(CONF_REFRESH_TOKEN) or "").strip() or entry.data[CONF_REFRESH_TOKEN]
             account_id, refresh_token, errors = await self._async_validate(country, language, token, entry)
             if not errors:
+                data_updates = {CONF_COUNTRY: country, CONF_LANGUAGE: language, CONF_REFRESH_TOKEN: refresh_token}
+                if not account_id:
+                    # Without the loyalty ID the account of the token cannot be compared
+                    return self.async_update_reload_and_abort(entry, data_updates=data_updates)
                 await self.async_set_unique_id(account_id)
                 self._abort_if_other_account(entry, account_id)
-                return self.async_update_reload_and_abort(
-                    entry,
-                    unique_id=account_id,
-                    data_updates={CONF_COUNTRY: country, CONF_LANGUAGE: language, CONF_REFRESH_TOKEN: refresh_token},
-                )
+                return self.async_update_reload_and_abort(entry, unique_id=account_id, data_updates=data_updates)
 
         source = user_input or entry.data
         suggested = {CONF_COUNTRY: source[CONF_COUNTRY], CONF_LANGUAGE: source[CONF_LANGUAGE]}

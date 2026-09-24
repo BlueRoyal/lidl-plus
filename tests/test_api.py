@@ -538,3 +538,19 @@ def test_syncs_at_the_same_time_keep_each_others_changes(api, session):
     tickets.join(5)
     assert [entry["id"] for entry in api.cached_tickets()] == ["t1"]
     assert [entry["id"] for entry in api.cached_leaflets()] == ["l1"]
+
+
+def test_account_id(api, session):
+    session.on("GET", TICKETS_URL, lambda url, **kwargs: {"tickets": [], "totalCount": 0, "size": 10})
+    session.on("GET", "https://profile.lidlplus.com", lambda url, **kwargs: FakeResponse(text='"123456"'))
+    assert api.account_id() == "123456"
+    # The first page of the receipts checks login and country
+    assert session.calls[1][2]["params"] == {"pageNumber": 1, "onlyFavorite": "False"}
+
+    # Some accounts get no answer from the loyalty endpoint, the login is fine anyway
+    session.on("GET", "https://profile.lidlplus.com", lambda url, **kwargs: FakeResponse(404, text="Not Found"))
+    assert api.account_id() is None
+
+    session.on("GET", TICKETS_URL, lambda url, **kwargs: FakeResponse(404, {}))
+    with pytest.raises(requests.HTTPError):
+        api.account_id()

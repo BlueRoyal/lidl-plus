@@ -763,6 +763,22 @@ class LidlPlusApi:  # pylint: disable=too-many-instance-attributes,too-many-publ
                 result["activated"].append(title)
         return result
 
+    def account_id(self):
+        """
+        Check the login and the country with the first page of the receipts, errors of this request are raised.
+
+        Returns the loyalty ID of the account, None if the loyalty endpoint does not answer (it fails for some
+        accounts while everything else works).
+        """
+        self._request(
+            "GET", f"{self._TICKET_API}/{self._country}/tickets", params={"pageNumber": 1, "onlyFavorite": "False"}
+        )
+        try:
+            return self.loyalty_id() or None
+        except requests.RequestException as exc:
+            _LOGGER.info("The loyalty ID could not be loaded: %s", exc)
+            return None
+
     def loyalty_id(self):
         """Get your loyalty ID"""
         response = self._request("GET", f"{self._PROFILE_API}/v1/{self._country}/loyalty")
