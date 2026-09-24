@@ -74,6 +74,7 @@
   <button class="tab-btn" onclick="showTab('products',this)">📦 Artikel</button>
   <button class="tab-btn" onclick="showTab('offers',this)">🏷️ Angebote</button>
   <button class="tab-btn" onclick="showTab('leaflets',this)">📰 Prospekte</button>
+  <button class="tab-btn" onclick="showTab('busy',this)">🕒 Stoßzeiten</button>
 </nav>
 
 <div class="max-w-7xl mx-auto px-4 py-5">
@@ -257,6 +258,28 @@
   </div>
 
   <div id="leafletGrid" class="text-center py-16 text-gray-400">Lade Prospekte…</div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: STOSSZEITEN
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-busy" class="tab">
+
+  <div class="bg-white rounded-2xl p-5 shadow-sm mb-4">
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+      <div class="min-w-0">
+        <h2 class="text-base font-semibold text-gray-800" id="busyStore">Stoßzeiten</h2>
+        <p class="text-xs text-gray-500 mt-0.5" id="busyOpening"></p>
+      </div>
+      <span id="busyNow" class="badge hidden"></span>
+    </div>
+    <div class="flex gap-1 mb-4 overflow-x-auto" id="busyDays"></div>
+    <div id="busyChartWrapper" style="height:240px;position:relative"><canvas id="chartBusy"></canvas></div>
+    <p class="text-center py-12 text-gray-400 hidden" id="busyClosed"></p>
+    <p class="text-sm text-gray-600 mt-4" id="busySummary"></p>
+    <p class="text-xs text-gray-400 mt-2" id="busySource"></p>
+  </div>
 
 </div>
 
@@ -463,6 +486,7 @@ function applyData(data) {
     ['Artikel', () => { renderProductStats(allProducts); filterProducts(); }],
     ['Angebote', () => { renderOfferStores(); filterOffers(); }],
     ['Prospekte', renderLeaflets],
+    ['Stoßzeiten', () => { if (document.getElementById('tab-busy').classList.contains('active')) renderBusy(); }],
   ]) {
     try {
       render();
@@ -504,6 +528,8 @@ function showTab(name, btn) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
   btn.classList.add('active');
+  // Charts need a visible canvas, so the busy hours are drawn when their tab is shown
+  if (name === 'busy') renderBusy();
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
@@ -1233,6 +1259,160 @@ document.getElementById('searchResults').addEventListener('click', event => {
   if (leaflet) return openLeaflet(leaflet.dataset.leafletId);
   const product = event.target.closest('[data-product-id]');
   if (product) showProductDetail(product.dataset.productId);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STOSSZEITEN
+// ══════════════════════════════════════════════════════════════════════════════
+const DAY_NAMES = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+const DAY_WORDS = ['montags', 'dienstags', 'mittwochs', 'donnerstags', 'freitags', 'samstags', 'sonntags'];
+const DAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+let busyDay = null, chartBusy = null;
+const weekdayOf = date => (date.getDay() + 6) % 7; // Monday = 0
+const hourOf = text => {
+  const m = /(\d{2}):(\d{2})/.exec(String(text ?? ''));
+  return m ? +m[1] + (+m[2] > 0 ? 1 : 0) : null; // a range until 21:30 includes the hour 21
+};
+const timeText = value => (/(\d{2}:\d{2})/.exec(String(value ?? '')) || [])[1] || String(value ?? '');
+const startHourOf = text => {
+  const m = /(\d{2}):\d{2}/.exec(String(text ?? ''));
+  return m ? +m[1] : null;
+};
+
+// Opening hours of a weekday of this week, special days (holidays) included; null if unknown
+function busyRanges(day) {
+  const opening = (appData.busy_times || {}).opening_hours;
+  if (!opening) return null;
+  const date = new Date();
+  date.setDate(date.getDate() + ((day - weekdayOf(date) + 7) % 7));
+  const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const special = (opening.special || {})[key];
+  return special !== undefined ? special : (opening[DAY_KEYS[day]] || []);
+}
+
+function busyLabel(value) {
+  if (value < 25) return 'kaum besucht';
+  if (value < 50) return 'mäßig besucht';
+  if (value < 75) return 'ziemlich voll';
+  return 'sehr voll';
+}
+
+function renderBusy() {
+  const busy = appData.busy_times;
+  const storeTitle = document.getElementById('busyStore');
+  const now = new Date(), today = weekdayOf(now);
+  if (busyDay === null) busyDay = today;
+  if (chartBusy) { chartBusy.destroy(); chartBusy = null; }
+  if (!busy || !busy.store) {
+    storeTitle.textContent = 'Stoßzeiten';
+    document.getElementById('busyOpening').textContent = 'Keine Filiale bekannt: wähle eine unter Einstellungen → Geräte & Dienste → Lidl Plus → Konfigurieren.';
+    ['busyDays', 'busySummary', 'busySource'].forEach(id => { document.getElementById(id).innerHTML = ''; });
+    document.getElementById('busyChartWrapper').style.display = 'none';
+    document.getElementById('busyNow').classList.add('hidden');
+    return;
+  }
+  const store = busy.store;
+  storeTitle.textContent = `Lidl ${store.name || ''}`.trim();
+  const ranges = busyRanges(busyDay);
+  const opening = document.getElementById('busyOpening');
+  const address = [store.address, [store.postal_code, store.locality].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const hoursText = ranges === null ? 'Öffnungszeiten unbekannt'
+    : ranges.length ? ranges.map(r => `${timeText(r[0])}–${timeText(r[1])} Uhr`).join(', ')
+    : 'geschlossen';
+  opening.textContent = `${address} · ${busyDay === today ? 'heute' : DAY_NAMES[busyDay]}: ${hoursText}`;
+
+  document.getElementById('busyDays').innerHTML = DAY_NAMES.map((name, day) => `
+    <button class="btn ${day === busyDay ? 'btn-primary' : ''}" data-busy-day="${day}">${name}</button>`).join('');
+
+  // Hours shown: the opening hours of the day, 6 to 22 o'clock if they are unknown
+  let first = 6, last = 22;
+  if (ranges && ranges.length) {
+    first = Math.min(...ranges.map(r => startHourOf(r[0])));
+    last = Math.max(...ranges.map(r => hourOf(r[1])));
+  }
+  const closed = ranges !== null && ranges.length === 0;
+  const hours = [];
+  for (let hour = first; hour < last; hour++) hours.push(hour);
+  const forecast = busy.forecast ? busy.forecast.hours[busyDay] : null;
+  const own = busy.own ? busy.own.hours[busyDay] : new Array(24).fill(0);
+
+  const badge = document.getElementById('busyNow');
+  const todayRanges = busyRanges(today);
+  const openNow = todayRanges === null || todayRanges.some(r => startHourOf(r[0]) <= now.getHours() && now.getHours() < hourOf(r[1]));
+  if (!openNow) {
+    badge.className = 'badge bg-gray-100 text-gray-500';
+    badge.textContent = 'Jetzt geschlossen';
+  } else if (busy.forecast && busy.forecast.hours[today][now.getHours()] != null) {
+    const value = busy.forecast.hours[today][now.getHours()];
+    badge.className = `badge ${value >= 75 ? 'bg-red-100 text-red-600' : value >= 50 ? 'badge-upcoming' : 'badge-current'}`;
+    badge.textContent = `Jetzt: ${value} % – ${busyLabel(value)}`;
+  } else {
+    badge.className = 'badge hidden';
+  }
+
+  const wrapper = document.getElementById('busyChartWrapper');
+  const closedText = document.getElementById('busyClosed');
+  closedText.classList.toggle('hidden', !closed);
+  closedText.textContent = closed ? `${busyDay === today ? 'Heute' : DAY_NAMES[busyDay]} geschlossen` : '';
+  wrapper.style.display = closed ? 'none' : 'block';
+  if (!closed) {
+    const current = hour => busyDay === today && hour === now.getHours();
+    const datasets = forecast ? [
+      {label: 'Erwartete Auslastung (%)', data: hours.map(h => forecast[h]), yAxisID: 'y',
+       backgroundColor: hours.map(h => current(h) ? '#e35d4f' : 'rgba(0,56,130,0.55)'), borderRadius: 4, order: 2},
+      {type: 'line', label: 'Deine Einkäufe', data: hours.map(h => own[h]), yAxisID: 'y2',
+       borderColor: '#f59e0b', backgroundColor: '#f59e0b', pointRadius: 3, tension: 0, order: 1},
+    ] : [
+      {label: 'Deine Einkäufe', data: hours.map(h => own[h]), yAxisID: 'y',
+       backgroundColor: hours.map(h => current(h) ? '#e35d4f' : 'rgba(0,56,130,0.55)'), borderRadius: 4},
+    ];
+    const scales = {
+      x: {grid: {display: false}},
+      y: {beginAtZero: true, grid: {color: '#f3f4f6'}, ...(forecast ? {max: 100, ticks: {callback: v => v + ' %'}} : {ticks: {precision: 0}})},
+    };
+    if (forecast) scales.y2 = {beginAtZero: true, position: 'right', grid: {display: false}, ticks: {precision: 0}};
+    chartBusy = new Chart(document.getElementById('chartBusy'), {
+      type: 'bar',
+      data: {labels: hours.map(h => `${h} Uhr`), datasets},
+      options: {responsive: true, maintainAspectRatio: false, scales,
+        plugins: {legend: {display: Boolean(forecast), position: 'bottom'}}},
+    });
+  }
+
+  // Quietest and busiest hour of the day, and when the user shops most often
+  const summary = [];
+  if (forecast && !closed) {
+    const open = hours.filter(h => forecast[h] != null);
+    if (open.length) {
+      const quiet = open.reduce((a, b) => forecast[b] < forecast[a] ? b : a);
+      const full = open.reduce((a, b) => forecast[b] > forecast[a] ? b : a);
+      summary.push(`Am ruhigsten um ${quiet} Uhr (${forecast[quiet]} %), am vollsten um ${full} Uhr (${forecast[full]} %).`);
+    }
+  }
+  const counts = busy.own ? busy.own.hours : [];
+  let best = null;
+  counts.forEach((row, day) => row.forEach((count, hour) => { if (count && (!best || count > best.count)) best = {day, hour, count}; }));
+  summary.push(best
+    ? `Du kaufst hier meist ${DAY_WORDS[best.day]} um ${best.hour} Uhr ein (${best.count} von ${busy.own.receipts} Kassenbons).`
+    : 'Aus dieser Filiale gibt es noch keine Kassenbons.');
+  document.getElementById('busySummary').textContent = summary.join(' ');
+
+  const source = document.getElementById('busySource');
+  if (busy.forecast) {
+    source.textContent = `Stoßzeiten: Prognose von BestTime.app (Stand ${fmtDate(busy.forecast.updated)}).`
+      + (busy.forecast_error ? ` Aktualisierung fehlgeschlagen: ${busy.forecast_error}` : '');
+  } else {
+    source.textContent = busy.forecast_error
+      ? `BestTime.app: ${busy.forecast_error}`
+      : 'Für echte Stoßzeiten: ein Konto bei besttime.app anlegen und den privaten API-Schlüssel unter Einstellungen → Geräte & Dienste → Lidl Plus → Konfigurieren eintragen. Bis dahin siehst du, wann du selbst hier einkaufst.';
+  }
+}
+
+document.getElementById('busyDays').addEventListener('click', event => {
+  const button = event.target.closest('[data-busy-day]');
+  if (!button) return;
+  busyDay = +button.dataset.busyDay;
+  renderBusy();
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────

@@ -13,7 +13,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.lidl_plus._lidlplus import analytics
 from custom_components.lidl_plus.const import CONF_COUNTRY, CONF_LANGUAGE, CONF_REFRESH_TOKEN, DOMAIN
-from sample_data import flyer, item, leaflet, leaflet_overview, offer, ticket
+from sample_data import OPENING_HOURS, flyer, item, leaflet, leaflet_overview, offer, ticket
 
 LOYALTY_ID = "4000000123456"
 NOW = "2026-05-15T12:00:00+00:00"
@@ -109,8 +109,20 @@ class FakeApiState:
             "aktion-0": flyer(("Ostern", []))["flyer"],
         }
         self.leaflet_archive: dict[str, dict] = {}
-        # Offer region of the stores (None: national leaflets) and the regional leaflet overviews
-        self.leaflet_region: dict | None = None
+        # Details of the stores (the offer region None: national leaflets) and the regional leaflet overviews
+        self.store_directory: dict | None = {
+            "store": {
+                "id": "DE1234",
+                "name": "Musterstadt",
+                "address": "Hauptstraße 1",
+                "postal_code": "12345",
+                "locality": "Musterstadt",
+            },
+            "region": None,
+            "region_name": "",
+            "opening_hours": analytics.opening_hours(OPENING_HOURS),
+            "checked": NOW,
+        }
         self.leaflets_by_region: dict[int, Any] = {}
         self.region_calls: list[str] = []
         self.synced_regions: list[int | None] = []
@@ -175,9 +187,9 @@ class FakeLidlPlusApi:
     def cached_offers(self) -> list[dict]:
         return analytics.archived_offers(self._state.offer_archive)
 
-    def leaflet_region(self, store_key: str) -> dict | None:
+    def store_directory(self, store_key: str) -> dict | None:
         self._state.region_calls.append(store_key)
-        return self._state.leaflet_region
+        return self._state.store_directory
 
     def sync_leaflets(self, categories: Any = None, region: int | None = None) -> int:
         """Keeps the history like LidlPlusApi.sync_leaflets, leaflets that ended are not loaded"""

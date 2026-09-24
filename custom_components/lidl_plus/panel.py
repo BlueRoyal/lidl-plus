@@ -16,6 +16,7 @@ from ._lidlplus import analytics
 from .const import (
     DOMAIN,
     KEY_AVERAGE_BASKET,
+    KEY_BUSY_TIMES,
     KEY_CATEGORY_FOOD_SPENDING,
     KEY_CATEGORY_NONFOOD_SPENDING,
     KEY_CURRENT_MONTH_SPENDING,
@@ -117,6 +118,7 @@ def build_panel_data(data: dict[str, Any]) -> dict[str, Any]:
         # Pages and products are loaded when a leaflet is opened
         "leaflets": [analytics.leaflet_summary(leaflet) for leaflet in active_leaflets(data)],
         "leaflet_region": data.get(KEY_LEAFLET_REGION),
+        "busy_times": data.get(KEY_BUSY_TIMES),
         "stores": data.get(KEY_STORES, []),
         "last_sync": data.get(KEY_LAST_SYNC),
         "last_error": data.get(KEY_LAST_ERROR),

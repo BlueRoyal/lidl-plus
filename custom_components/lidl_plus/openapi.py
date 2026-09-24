@@ -172,6 +172,15 @@ _OPERATIONS: dict[str, tuple[str, str, str, list[dict[str, Any]]]] = {
         "region whose leaflets are shown (the weekly leaflets differ between the regions).",
         [_ENTRY],
     ),
+    "/busy_times": (
+        "getBusyTimes",
+        "Busy hours of the store",
+        "For the store of the offers: address, opening hours (special days like holidays in `special`), the "
+        "number of receipts per weekday (0 = Monday) and hour (`own.hours`, when the user went shopping) and, if "
+        "configured, the expected busyness in percent per weekday and hour from BestTime.app (`forecast.hours`) "
+        "with `busyness_now` for the current hour. The best start for questions like 'when is the store quiet?'.",
+        [_ENTRY],
+    ),
     "/export": (
         "exportData",
         "Export",

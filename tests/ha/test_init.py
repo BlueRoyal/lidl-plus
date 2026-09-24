@@ -391,6 +391,7 @@ async def test_diagnostics(hass: HomeAssistant, api_state: FakeApiState, config_
         "leaflets_without_products": 0,
     }
     assert diagnostics["leaflet_region_known"] is False
+    assert diagnostics["busy_times"] == {"opening_hours_known": True, "forecast": False, "forecast_error": None}
     dump = json.dumps(diagnostics)
     for private in ("rotated-token", LOYALTY_ID, "Lidl Musterstadt", "Lidl Nord", '"t1"'):
         assert private not in dump
@@ -410,3 +411,15 @@ async def test_account_without_loyalty_id(
     assert any("Loyalty-ID nicht verfügbar: 404 Client Error" in line for line in log)
     diagnostics = await async_get_config_entry_diagnostics(hass, config_entry)
     assert diagnostics["loyalty_id_error"] == "404 Client Error: Not Found"
+
+
+async def test_diagnostics_without_besttime_key(hass: HomeAssistant, api_state: FakeApiState) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=LOYALTY_ID,
+        data={CONF_COUNTRY: "DE", CONF_LANGUAGE: "de", CONF_REFRESH_TOKEN: "old-token"},
+        options={"besttime_api_key": "pri_very_secret"},
+    )
+    entry.add_to_hass(hass)
+    await setup_entry(hass, entry)
+    assert "pri_very_secret" not in json.dumps(await async_get_config_entry_diagnostics(hass, entry))

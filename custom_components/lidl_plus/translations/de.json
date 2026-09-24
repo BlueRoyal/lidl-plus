@@ -43,14 +43,16 @@
   "options": {
     "step": {
       "init": {
-        "title": "Filialen für die Angebote",
-        "description": "Wähle die Filialen, deren aktuelle und kommende Angebote geladen werden. Ohne Auswahl wird die Filiale genommen, in der du am häufigsten einkaufst.",
+        "title": "Filialen",
+        "description": "Wähle die Filialen, deren aktuelle und kommende Angebote geladen werden. Die erste Filiale bestimmt außerdem die Region der Prospekte und die Filiale der Stoßzeiten. Ohne Auswahl wird die Filiale genommen, in der du am häufigsten einkaufst.",
         "data": {
           "offer_stores": "Filialen",
-          "search": "Weitere Filialen suchen"
+          "search": "Weitere Filialen suchen",
+          "besttime_api_key": "Privater API-Schlüssel von BestTime.app (optional)"
         },
         "data_description": {
-          "search": "Ort, Postleitzahl oder Straße. Die gefundenen Filialen erscheinen in der Liste, dort auswählen und speichern."
+          "search": "Ort, Postleitzahl oder Straße. Die gefundenen Filialen erscheinen in der Liste, dort auswählen und speichern.",
+          "besttime_api_key": "Für die Stoßzeiten der Filiale: Konto auf besttime.app anlegen und den privaten API-Schlüssel eintragen. Eine Prognose kostet 2 Credits und wird alle 3 Wochen erneuert."
         }
       }
     },
@@ -87,7 +89,8 @@
       "offers_current": { "name": "Aktuelle Angebote" },
       "offers_upcoming": { "name": "Kommende Angebote" },
       "offers_for_you": { "name": "Angebote für gekaufte Artikel" },
-      "leaflets": { "name": "Prospekte" }
+      "leaflets": { "name": "Prospekte" },
+      "store_busyness": { "name": "Auslastung der Filiale" }
     }
   },
   "selector": {

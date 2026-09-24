@@ -233,10 +233,22 @@ def flyer(*pages):
     return {"success": True, "flyer": result}
 
 
+OPENING_HOURS = {
+    "timezone": "Europe/Berlin",
+    "regular": {
+        **{day: [{"from": "07:00", "to": "22:00"}] for day in ("monday", "tuesday", "wednesday", "thursday", "friday")},
+        "saturday": [{"from": "07:00", "to": "21:00"}],
+        "sunday": [],
+    },
+    "special": [{"date": "2026-10-03", "timeRanges": []}],
+}
+
+
 def directory_page(stores=(), cities=()):
     """
-    Data of a page of the store directory of lidl.de in the format of Nuxt: a list in which objects refer
-    to their values by index. stores as (object number, offer region, region name), cities as (name, url).
+    Data of a page of the store directory of lidl.de in the format of Nuxt: a list in which objects and lists
+    refer to their values by index. stores as (object number, offer region, region name[, opening hours]),
+    cities as (name, url).
     """
     payload = [{"data": 1}, ["ShallowReactive", 2], {}]
 
@@ -244,11 +256,21 @@ def directory_page(stores=(), cities=()):
         payload.append(value)
         return len(payload) - 1
 
-    for object_number, region, name in stores:
+    def add_value(value):
+        if isinstance(value, dict):
+            return add({key: add_value(child) for key, child in value.items()})
+        if isinstance(value, list):
+            return add([add_value(child) for child in value])
+        return add(value)
+
+    for object_number, region, name, *hours in stores:
         marketing = add(
             {"externalUrl": -1, "offerRegion": add(region), "offerRegionName": add(name), "zone": add("DE1")}
         )
-        add({"objectNumber": add(object_number), "storeName": add("Filiale"), "marketingData": marketing})
+        store = {"objectNumber": add(object_number), "storeName": add("Filiale"), "marketingData": marketing}
+        if hours:
+            store["generalOpeningHours"] = add_value(hours[0])
+        add(store)
     for name, url in cities:
         add({"name": add(name), "numberOfStores": add(3), "federalState": add("Hessen"), "url": add(url)})
     return payload

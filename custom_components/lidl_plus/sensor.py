@@ -13,16 +13,18 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import CURRENCY_EURO, MAX_LENGTH_STATE_STATE, EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.const import CURRENCY_EURO, MAX_LENGTH_STATE_STATE, PERCENTAGE, EntityCategory
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
     KEY_AVERAGE_BASKET,
+    KEY_BUSY_TIMES,
     KEY_CATEGORY_FOOD_SPENDING,
     KEY_CATEGORY_NONFOOD_SPENDING,
     KEY_COUPONS,
@@ -117,6 +119,27 @@ def _leaflet_summary(leaflet: dict) -> dict:
     }
 
 
+def _busyness_now(data: dict) -> int | None:
+    """Expected busyness of the store in this hour, from the forecast of BestTime.app"""
+    forecast = (data.get(KEY_BUSY_TIMES) or {}).get("forecast")
+    if not forecast:
+        return None
+    now = dt_util.now()
+    return forecast["hours"][now.weekday()][now.hour]
+
+
+def _busyness_attributes(data: dict) -> dict:
+    busy = data.get(KEY_BUSY_TIMES) or {}
+    forecast = busy.get("forecast") or {}
+    return {
+        "store": (busy.get("store") or {}).get("name"),
+        # Busyness of every hour of today, for cards and automations
+        "today": forecast["hours"][dt_util.now().weekday()] if forecast else None,
+        "forecast_updated": forecast.get("updated"),
+        "source": "BestTime.app" if forecast else None,
+    }
+
+
 @dataclass(frozen=True, kw_only=True)
 class LidlPlusSensorDescription(SensorEntityDescription):
     """Sensor description with value and attribute callables."""
@@ -124,6 +147,8 @@ class LidlPlusSensorDescription(SensorEntityDescription):
     value_fn: Callable[[dict], Any] = lambda _: None
     attrs_fn: Callable[[dict], dict] | None = None
     last_reset_fn: Callable[[dict], datetime | None] | None = None
+    # The value depends on the hour of the day, the state is written every hour
+    hourly: bool = False
 
 
 SENSOR_DESCRIPTIONS: tuple[LidlPlusSensorDescription, ...] = (
@@ -445,6 +470,17 @@ SENSOR_DESCRIPTIONS: tuple[LidlPlusSensorDescription, ...] = (
         value_fn=lambda d: len(d[KEY_OFFERS_FOR_YOU]),
         attrs_fn=lambda d: {"offers": [_offer_summary(offer) for offer in d[KEY_OFFERS_FOR_YOU]]},
     ),
+    # ── Stoßzeiten: erwartete Auslastung der Filiale in dieser Stunde ─────────
+    LidlPlusSensorDescription(
+        key="store_busyness",
+        translation_key="store_busyness",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:account-group",
+        value_fn=_busyness_now,
+        attrs_fn=_busyness_attributes,
+        hourly=True,
+    ),
     # ── Aktuelle und kommende Prospekte ──────────────────────────────────────
     LidlPlusSensorDescription(
         key=KEY_LEAFLETS,
@@ -482,6 +518,7 @@ class LidlPlusSensor(CoordinatorEntity[LidlPlusCoordinator], SensorEntity):
             "spending_by_month",
             "stores",
             "suggestions",
+            "today",
         }
     )
 
@@ -501,6 +538,15 @@ class LidlPlusSensor(CoordinatorEntity[LidlPlusCoordinator], SensorEntity):
             model="Lidl Plus App",
             entry_type=DeviceEntryType.SERVICE,
         )
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if self.entity_description.hourly:
+            self.async_on_remove(async_track_time_change(self.hass, self._async_new_hour, minute=0, second=5))
+
+    @callback
+    def _async_new_hour(self, _now: datetime) -> None:
+        self.async_write_ha_state()
 
     @property
     def native_value(self) -> Any:

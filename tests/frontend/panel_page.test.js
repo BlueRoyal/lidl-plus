@@ -12,6 +12,7 @@ const json = (value) => JSON.stringify(value);
 function openPage({ withChart = true } = {}) {
   const parentMessages = [];
   const charts = [];
+  const configs = [];
   const errors = [];
   const dom = new JSDOM(html, {
     url: `${ORIGIN}/lidl_plus_frontend/index.html?v=1.2.0`,
@@ -20,7 +21,7 @@ function openPage({ withChart = true } = {}) {
       // The vendor scripts are not loaded by jsdom, a stub records the charts
       if (withChart) {
         window.Chart = class {
-          constructor(canvas, config) { charts.push(config.type); }
+          constructor(canvas, config) { charts.push(config.type); configs.push(config); }
           destroy() {}
         };
       }
@@ -33,7 +34,7 @@ function openPage({ withChart = true } = {}) {
   const { window } = dom;
   const send = (data) =>
     window.dispatchEvent(new window.MessageEvent("message", { data, origin: ORIGIN, source: window.parent }));
-  return { window, document: window.document, parentMessages, charts, errors, send };
+  return { window, document: window.document, parentMessages, charts, configs, errors, send };
 }
 
 const now = new Date();
@@ -219,10 +220,21 @@ const details = {
   ],
   version: "2026-05-15T12:00:01+00:00",
   leaflet_region: { region: 10, name: "Grevenbroich <b>", store: "DE1234" },
+  busy_times: {
+    store: { id: "DE1234", name: "Musterstadt <b>", address: "Hauptstraße 1", postal_code: "12345", locality: "Musterstadt" },
+    opening_hours: {
+      monday: [["07:00", "22:00"]], tuesday: [["07:00", "22:00"]], wednesday: [["07:00", "22:00"]],
+      thursday: [["07:00", "22:00"]], friday: [["07:00", "22:00"]], saturday: [["07:00", "22:00"]], sunday: [], special: {},
+    },
+    // Busyness = hour of the day, so every value is easy to check
+    forecast: { venue_name: "Lidl", updated: "2026-05-01T10:00:00+00:00", hours: Array.from({ length: 7 }, () => Array.from({ length: 24 }, (_, hour) => hour * 4)) },
+    forecast_error: null,
+    own: { receipts: 3, hours: Array.from({ length: 7 }, (_, day) => Array.from({ length: 24 }, (_, hour) => (day === 5 && hour === 17 ? 2 : day === 0 && hour === 9 ? 1 : 0))) },
+  },
 };
 
 (async () => {
-  const { window, document, parentMessages, errors, send } = openPage();
+  const { window, document, parentMessages, charts, configs, errors, send } = openPage();
   send({ type: "lidl-plus:data", data: details });
   assert.deepStrictEqual(errors, []);
   const lastMessage = () => parentMessages[parentMessages.length - 1].msg;
@@ -372,6 +384,59 @@ const details = {
   assert.ok(menu.classList.contains("hidden"), "a click elsewhere closes the menu");
   menu.querySelector("[data-dataset='all']").click();
   assert.strictEqual(json(lastMessage()), json({ type: "lidl-plus:export", dataset: "all", entry_id: "e1", id: lastMessage().id }));
+
+  // Busy hours: drawn when the tab is shown
+  const chartCount = charts.length;
+  const busyTab = [...document.querySelectorAll(".tab-btn")].find((button) => button.textContent.includes("Stoßzeiten"));
+  busyTab.click();
+  assert.strictEqual(charts.length, chartCount + 1);
+  assert.strictEqual(document.getElementById("busyStore").textContent, "Lidl Musterstadt <b>");
+  assert.strictEqual(document.querySelectorAll("#tab-busy b").length, 0);
+  const dayButtons = document.querySelectorAll("#busyDays [data-busy-day]");
+  assert.strictEqual(dayButtons.length, 7);
+  const now = new Date();
+  const today = (now.getDay() + 6) % 7;
+  assert.ok(dayButtons[today].classList.contains("btn-primary"));
+  // Today: the current hour is red, if the store is open now
+  const openNow = today < 6 && now.getHours() >= 7 && now.getHours() < 22;
+  let config = configs[configs.length - 1];
+  if (today < 6) {
+    assert.deepStrictEqual([config.data.labels[0], config.data.labels[config.data.labels.length - 1]], ["7 Uhr", "21 Uhr"]);
+    const red = config.data.datasets[0].backgroundColor.filter((color) => color === "#e35d4f").length;
+    assert.strictEqual(red, openNow ? 1 : 0);
+  }
+  const badge = document.getElementById("busyNow");
+  assert.strictEqual(badge.textContent, openNow ? `Jetzt: ${now.getHours() * 4} % – ${now.getHours() * 4 < 50 ? "mäßig besucht" : now.getHours() * 4 < 75 ? "ziemlich voll" : "sehr voll"}` : "Jetzt geschlossen");
+
+  // Monday: opening hours, forecast and own purchases
+  dayButtons[0].click();
+  config = configs[configs.length - 1];
+  assert.ok(plain(document.getElementById("busyOpening")).endsWith(`${today === 0 ? "heute" : "Mo"}: 07:00–22:00 Uhr`), plain(document.getElementById("busyOpening")));
+  assert.ok(plain(document.getElementById("busyOpening")).startsWith("Hauptstraße 1, 12345 Musterstadt"));
+  assert.strictEqual(json(config.data.datasets.map((dataset) => dataset.label)), json(["Erwartete Auslastung (%)", "Deine Einkäufe"]));
+  assert.strictEqual(config.data.datasets[0].data[0], 28, "7 o'clock");
+  assert.strictEqual(config.data.datasets[1].data[2], 1, "a purchase at 9 o'clock");
+  const summary = plain(document.getElementById("busySummary"));
+  assert.ok(summary.includes("Am ruhigsten um 7 Uhr (28 %), am vollsten um 21 Uhr (84 %)."), summary);
+  assert.ok(summary.includes("Du kaufst hier meist samstags um 17 Uhr ein (2 von 3 Kassenbons)."), summary);
+  assert.ok(document.getElementById("busySource").textContent.startsWith("Stoßzeiten: Prognose von BestTime.app (Stand "));
+  // Sunday: closed
+  document.querySelectorAll("#busyDays [data-busy-day]")[6].click();
+  assert.ok(!document.getElementById("busyClosed").classList.contains("hidden"));
+  assert.strictEqual(document.getElementById("busyClosed").textContent, `${today === 6 ? "Heute" : "So"} geschlossen`);
+  assert.strictEqual(document.getElementById("busyChartWrapper").style.display, "none");
+
+  // Without forecast the own purchases are shown, with the reason of a failed forecast
+  send({ type: "lidl-plus:data", data: { ...details, version: "v3", busy_times: { ...details.busy_times, forecast: null, forecast_error: "Invalid API key" } } });
+  document.querySelectorAll("#busyDays [data-busy-day]")[5].click();
+  config = configs[configs.length - 1];
+  assert.strictEqual(json(config.data.datasets.map((dataset) => dataset.label)), json(["Deine Einkäufe"]));
+  assert.strictEqual(document.getElementById("busySource").textContent, "BestTime.app: Invalid API key");
+  assert.ok(document.getElementById("busyNow").classList.contains("hidden") || document.getElementById("busyNow").textContent === "Jetzt geschlossen");
+  // Without a store
+  send({ type: "lidl-plus:data", data: { ...details, version: "v4", busy_times: null } });
+  assert.ok(document.getElementById("busyOpening").textContent.startsWith("Keine Filiale bekannt"));
+  assert.strictEqual(document.getElementById("busyChartWrapper").style.display, "none");
 
   assert.deepStrictEqual(errors, []);
   window.close();

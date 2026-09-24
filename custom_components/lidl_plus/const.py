@@ -7,6 +7,10 @@ CONF_COUNTRY = "country"
 CONF_LANGUAGE = "language"
 # Option: store keys whose offers are loaded, without it the most visited store is used
 CONF_OFFER_STORES = "offer_stores"
+# Option: private API key of BestTime.app for the busy hours of the store
+CONF_BESTTIME_API_KEY = "besttime_api_key"
+# A forecast of BestTime.app is created again after this number of days (BestTime recommends 2 to 4 weeks)
+BESTTIME_REFRESH_DAYS = 21
 
 DEFAULT_SCAN_INTERVAL_HOURS = 6
 FREQUENTLY_BOUGHT_LIMIT = 10
@@ -49,6 +53,8 @@ KEY_OFFERS_FOR_YOU = "offers_for_you"
 KEY_LEAFLETS = "leaflets"
 # Offer region whose weekly leaflets are shown, the leaflets differ from region to region
 KEY_LEAFLET_REGION = "leaflet_region"
+# Busy hours of the store: opening hours, own shopping times and the forecast of BestTime.app
+KEY_BUSY_TIMES = "busy_times"
 # Changes with every update of the data, also when only offers or leaflets changed
 KEY_DATA_VERSION = "data_version"
 

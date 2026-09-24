@@ -23,11 +23,22 @@ from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
 )
 
 from ._lidlplus.api import LidlPlusApi
 from ._lidlplus.exceptions import LoginError, MissingLogin
-from .const import CONF_COUNTRY, CONF_LANGUAGE, CONF_OFFER_STORES, CONF_REFRESH_TOKEN, DOMAIN, KEY_STORES
+from .const import (
+    CONF_BESTTIME_API_KEY,
+    CONF_COUNTRY,
+    CONF_LANGUAGE,
+    CONF_OFFER_STORES,
+    CONF_REFRESH_TOKEN,
+    DOMAIN,
+    KEY_STORES,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -214,6 +225,7 @@ class LidlPlusOptionsFlow(OptionsFlow):
     def __init__(self) -> None:
         self._choices: dict[str, str] = {}
         self._selected: list[str] = []
+        self._api_key: str | None = None
 
     def _schema(self, default: list[str]) -> vol.Schema:
         options = [SelectOptionDict(value=key, label=label) for key, label in self._choices.items()]
@@ -223,12 +235,17 @@ class LidlPlusOptionsFlow(OptionsFlow):
                     SelectSelectorConfig(options=options, multiple=True, mode=SelectSelectorMode.LIST)
                 ),
                 vol.Optional("search"): str,
+                vol.Optional(CONF_BESTTIME_API_KEY, description={"suggested_value": self._api_key}): TextSelector(
+                    TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                ),
             }
         )
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Stores of the receipts, the configured ones and a search for further stores."""
         errors: dict[str, str] = {}
+        if self._api_key is None:
+            self._api_key = self.config_entry.options.get(CONF_BESTTIME_API_KEY) or ""
         if not self._choices:
             coordinator = getattr(self.config_entry, "runtime_data", None)
             data = (coordinator.data if coordinator else None) or {}
@@ -238,6 +255,7 @@ class LidlPlusOptionsFlow(OptionsFlow):
                 self._choices.setdefault(key, key)
         if user_input is not None:
             self._selected = user_input.get(CONF_OFFER_STORES, [])
+            self._api_key = (user_input.get(CONF_BESTTIME_API_KEY) or "").strip()
             if query := (user_input.get("search") or "").strip():
                 try:
                     found = await self.hass.async_add_executor_job(self._search, query)
@@ -262,7 +280,9 @@ class LidlPlusOptionsFlow(OptionsFlow):
     @callback
     def _async_save(self) -> ConfigFlowResult:
         # Without a selection the most visited store of the receipts is used
-        options = {CONF_OFFER_STORES: self._selected}
+        options: dict[str, Any] = {CONF_OFFER_STORES: self._selected}
+        if self._api_key:
+            options[CONF_BESTTIME_API_KEY] = self._api_key
         if coordinator := getattr(self.config_entry, "runtime_data", None):
             # Load the offers of the new stores right away. The refresh starts before the flow manager saves
             # the result, so the options are saved here first (saving the same options again changes nothing).

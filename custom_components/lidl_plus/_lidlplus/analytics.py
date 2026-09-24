@@ -630,22 +630,99 @@ def nuxt_objects(payload, *keys):
     ]
 
 
+def _nuxt_resolve(payload, value, depth=0):
+    """A value of a Nuxt payload with the references of its lists and objects resolved (limited depth)"""
+    if depth > 8:
+        return None
+    if isinstance(value, dict):
+        return {key: _nuxt_resolve(payload, _nuxt_value(payload, index), depth + 1) for key, index in value.items()}
+    if isinstance(value, list):
+        return [_nuxt_resolve(payload, _nuxt_value(payload, index), depth + 1) for index in value]
+    return value
+
+
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _time_ranges(ranges):
+    return (
+        [
+            [str(entry["from"]), str(entry["to"])]
+            for entry in ranges
+            if isinstance(entry, dict) and entry.get("from") and entry.get("to")
+        ]
+        if isinstance(ranges, list)
+        else []
+    )
+
+
+def opening_hours(general):
+    """
+    Opening hours of the store directory of lidl.de: {"monday": [["07:00", "22:00"]], ..., "sunday": [],
+    "special": {"2026-10-03": []}} (special: days with other opening hours, e.g. holidays)
+    """
+    general = general if isinstance(general, dict) else {}
+    regular = general.get("regular") if isinstance(general.get("regular"), dict) else {}
+    result = {day: _time_ranges(regular.get(day)) for day in WEEKDAYS}
+    result["special"] = {
+        str(day["date"]): _time_ranges(day.get("timeRanges"))
+        for day in general.get("special") or []
+        if isinstance(day, dict) and day.get("date")
+    }
+    return result
+
+
+def store_directory_entries(payload):
+    """
+    The stores of a page of the store directory of lidl.de with their offer region and opening hours:
+    {"DE01605": {"region": 10, "region_name": "Grevenbroich", "opening_hours": {...}}}
+    """
+    entries = {}
+    for item in payload if isinstance(payload, list) else []:
+        number = _nuxt_value(payload, item.get("objectNumber")) if isinstance(item, dict) else None
+        if not isinstance(number, str):
+            continue
+        # Stores are listed several times (e.g. as nearby store), not always with all details
+        entry = entries.setdefault(number, {"region": None, "region_name": "", "opening_hours": None})
+        marketing = _nuxt_value(payload, item.get("marketingData"))
+        if isinstance(marketing, dict):
+            region = _nuxt_value(payload, marketing.get("offerRegion"))
+            name = _nuxt_value(payload, marketing.get("offerRegionName"))
+            if isinstance(region, int) and entry["region"] is None:
+                entry["region"] = region
+            if isinstance(name, str) and name and not entry["region_name"]:
+                entry["region_name"] = name
+        general = _nuxt_value(payload, item.get("generalOpeningHours"))
+        if isinstance(general, dict) and entry["opening_hours"] is None:
+            entry["opening_hours"] = opening_hours(_nuxt_resolve(payload, general))
+    return entries
+
+
 def store_offer_regions(payload):
     """Offer regions of the stores in a page of the store directory of lidl.de: {"DE01605": (10, "Grevenbroich")}"""
-    regions = {}
-    for store in nuxt_objects(payload, "objectNumber", "marketingData"):
-        marketing = store["marketingData"]
-        if not isinstance(store["objectNumber"], str) or not isinstance(marketing, dict):
+    return {
+        number: (entry["region"], entry["region_name"])
+        for number, entry in store_directory_entries(payload).items()
+        if entry["region"] is not None
+    }
+
+
+def shopping_times(tickets, store_id=None):
+    """
+    When the receipts were made, of one store or of all: {"store": ..., "receipts": 105,
+    "hours": [[receipts at 0:00, ..., at 23:00] for Monday, ..., Sunday]} (local time of the receipts)
+    """
+    hours = [[0] * 24 for _ in range(7)]
+    count = 0
+    for ticket in tickets:
+        if store_id and (ticket.get("store") or {}).get("id") != store_id:
             continue
-        region = _nuxt_value(payload, marketing.get("offerRegion"))
-        name = _nuxt_value(payload, marketing.get("offerRegionName"))
-        if not isinstance(region, int):
+        date = parse_datetime(ticket.get("date"))
+        if date is None:
             continue
-        # Stores are listed several times (e.g. as nearby store), not always with the name of the region
-        known = regions.get(store["objectNumber"])
-        if known is None or (not known[1] and isinstance(name, str) and name):
-            regions[store["objectNumber"]] = (region, name if isinstance(name, str) else "")
-    return regions
+        hours[date.weekday()][date.hour] += 1
+        count += 1
+    return {"store": store_id, "receipts": count, "hours": hours}
 
 
 def _dicts(values):

@@ -11,7 +11,7 @@ import requests
 
 from lidlplus import LidlPlusApi
 from lidlplus.exceptions import AuthenticationError, MissingLogin
-from sample_data import Receipt, directory_page, flyer, leaflet, leaflet_overview, offer, ticket
+from sample_data import OPENING_HOURS, Receipt, directory_page, flyer, leaflet, leaflet_overview, offer, ticket
 
 MILK_RECEIPT = Receipt().article("0001", "Milch", "1,09").build()
 
@@ -568,19 +568,24 @@ def test_leaflet_region(api, session, tmp_path):
     session.on(
         "GET",
         f"{DIRECTORY}/moenchengladbach/_payload.json",
-        lambda url, **kwargs: directory_page(stores=[("DE04711", 42, "Kerpen"), ("DE01234", 10, "Grevenbroich")]),
+        lambda url, **kwargs: directory_page(
+            stores=[("DE04711", 42, "Kerpen"), ("DE01234", 10, "Grevenbroich", OPENING_HOURS)]
+        ),
     )
     region = api.leaflet_region("DE1234")
     assert (region["region"], region["name"]) == (10, "Grevenbroich")
+    details = api.store_directory("DE1234")
+    assert details["store"]["locality"] == "Mönchengladbach"
+    assert details["opening_hours"]["saturday"] == [["07:00", "21:00"]]
     # No login needed
     assert TOKEN_URL not in session.urls()
 
-    # Kept in the cache for 30 days
+    # Kept in the cache for a week
     session.calls.clear()
     assert api.leaflet_region("DE1234")["region"] == 10
     assert not session.calls
     cache = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
-    cache["leaflet_regions"]["DE1234"]["checked"] = "2020-01-01T00:00:00+00:00"
+    cache["store_directory"]["DE1234"]["checked"] = "2020-01-01T00:00:00+00:00"
     (tmp_path / "cache.json").write_text(json.dumps(cache), encoding="utf-8")
     # A failed check keeps the region found before
     session.on("GET", STORE_URL, lambda url, **kwargs: FakeResponse(503, {}))
@@ -613,10 +618,14 @@ def test_leaflet_region_from_the_state_page(api, session):
     other._session = session
     session.on("GET", "https://stores.lidlplus.com/api/v1/DE/DE9999", lambda url, **kwargs: store)
     assert other.leaflet_region("DE9999") is None
-    # Only the German store directory is known
+    # Only the German store directory is known, the store itself is known in every country
     austria = LidlPlusApi("de", "AT", cache_file=None)
     austria._session = session
+    session.on("GET", "https://stores.lidlplus.com/api/v1/AT/AT1234", lambda url, **kwargs: {"name": "Wien"})
+    session.calls.clear()
     assert austria.leaflet_region("AT1234") is None
+    assert austria.store_directory("AT1234")["store"]["name"] == "Wien"
+    assert not [url for url in session.urls() if "lidl.de" in url]
 
 
 def test_sync_leaflets_of_a_region(api, session):

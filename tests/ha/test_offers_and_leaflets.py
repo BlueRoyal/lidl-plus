@@ -217,7 +217,7 @@ async def test_regional_leaflets(
     assert api_state.synced_regions == [None]
     assert [entry["id"] for entry in config_entry.runtime_data.data["leaflets"]] == ["l1", "l2"]
 
-    api_state.leaflet_region = {"region": 10, "name": "Grevenbroich", "checked": NOW}
+    api_state.store_directory = {**api_state.store_directory, "region": 10, "region_name": "Grevenbroich"}
     regional = leaflet("r1", "Aktionsprospekt", "aktion-r1", "2026-05-11", "2026-05-16", regions=["10", "42"])
     api_state.leaflets_by_region[10] = leaflet_overview(("Filial-Angebote", [regional]))
     api_state.flyers["aktion-r1"] = flyer(("Warsteiner Milbona Tilsiter", []))["flyer"]

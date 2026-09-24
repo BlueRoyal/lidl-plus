@@ -21,6 +21,7 @@ from ._lidlplus import analytics, export
 from .const import (
     DOMAIN,
     KEY_AVERAGE_BASKET,
+    KEY_BUSY_TIMES,
     KEY_CATEGORY_FOOD_SPENDING,
     KEY_CATEGORY_NONFOOD_SPENDING,
     KEY_COUPONS,
@@ -450,6 +451,30 @@ class StoresView(LidlPlusView):
         )
 
 
+class BusyTimesView(LidlPlusView):
+    """Opening hours and busy hours of the store, and the hours at which the receipts were made"""
+
+    url = f"{API_PATH}/busy_times"
+    name = "api:lidl_plus:busy_times"
+
+    async def get(self, request: web.Request) -> web.Response:
+        if (entry := self._entry(request)) is None:
+            return self._not_found()
+        busy = entry.runtime_data.data.get(KEY_BUSY_TIMES)
+        if not busy:
+            return self._not_found("No store known, the busy hours need a store of the receipts or of the options")
+        now = dt_util.now()
+        forecast = busy.get("forecast")
+        return self.json(
+            {
+                **busy,
+                "weekday": now.weekday(),
+                "hour": now.hour,
+                "busyness_now": forecast["hours"][now.weekday()][now.hour] if forecast else None,
+            }
+        )
+
+
 class ExportView(LidlPlusView):
     """Download of receipts, articles, products, offers or leaflets as CSV/JSON, or everything as ZIP"""
 
@@ -495,6 +520,7 @@ def async_setup_rest_api(hass: HomeAssistant) -> None:
         SearchView,
         CouponsView,
         StoresView,
+        BusyTimesView,
         ExportView,
     ):
         hass.http.register_view(view(hass))

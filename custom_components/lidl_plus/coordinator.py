@@ -11,19 +11,25 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from . import besttime
 from ._lidlplus import analytics, export
 from ._lidlplus.api import LidlPlusApi
 from ._lidlplus.exceptions import LoginError, MissingLogin
 from .const import (
+    BESTTIME_REFRESH_DAYS,
+    CONF_BESTTIME_API_KEY,
     CONF_OFFER_STORES,
     CONF_REFRESH_TOKEN,
     DEFAULT_SCAN_INTERVAL_HOURS,
     DOMAIN,
     FREQUENTLY_BOUGHT_LIMIT,
     KEY_AVERAGE_BASKET,
+    KEY_BUSY_TIMES,
     KEY_CATEGORY_FOOD_SPENDING,
     KEY_CATEGORY_NONFOOD_SPENDING,
     KEY_COUPONS,
@@ -175,6 +181,11 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._stored_token = api.refresh_token
         # Why the loyalty ID could not be loaded, shown in the diagnostics
         self.loyalty_error: str | None = None
+        # Forecasts of BestTime.app per store, kept in the storage of Home Assistant
+        self._forecast_store: Store[dict[str, Any]] = Store(hass, 1, f"{DOMAIN}_busy_times_{config_entry.entry_id}")
+        self._forecasts: dict[str, Any] | None = None
+        # A failed forecast costs a credit as well, it is not tried again too soon: store -> (API key, time)
+        self._forecast_failures: dict[str, tuple[str, Any, str]] = {}
 
     def _log(self, level: str, message: str) -> None:
         """Log to HA logger and keep entry in internal log."""
@@ -223,8 +234,44 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._log("ERROR", f"Sync fehlgeschlagen, Kassenbons aus dem Cache: {data[KEY_LAST_ERROR]}")
         else:
             self._log("INFO", f"Sync erfolgreich — {data[KEY_NEW_TICKETS_LAST_SYNC]} neue Kassenbons")
+        try:
+            data[KEY_BUSY_TIMES] = await self._async_add_forecast(data[KEY_BUSY_TIMES])
+        except Exception:  # noqa: BLE001
+            # The busy hours are an extra, they must never stop the update
+            _LOGGER.exception("Could not add the forecast of BestTime.app")
         data[KEY_LOG] = list(self._log_entries)
         return data
+
+    async def _async_add_forecast(self, busy: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Add the busy hours forecast of BestTime.app for the store, created again every 3 weeks"""
+        api_key = (self.config_entry.options.get(CONF_BESTTIME_API_KEY) or "").strip()
+        if not busy or not api_key or not busy.get("store"):
+            return busy
+        store = busy["store"]
+        if self._forecasts is None:
+            self._forecasts = await self._forecast_store.async_load() or {}
+        forecast = self._forecasts.get(store["id"])
+        updated = dt_util.parse_datetime(forecast["updated"]) if forecast else None
+        if updated and dt_util.utcnow() - updated < timedelta(days=BESTTIME_REFRESH_DAYS):
+            return {**busy, "forecast": forecast}
+        failed = self._forecast_failures.get(store["id"])
+        if failed and failed[0] == api_key and dt_util.utcnow() - failed[1] < timedelta(hours=24):
+            return {**busy, "forecast": forecast, "forecast_error": failed[2]}
+        address = ", ".join(
+            filter(None, [store.get("address"), f"{store.get('postal_code', '')} {store.get('locality', '')}".strip()])
+        )
+        try:
+            new = await besttime.async_new_forecast(async_get_clientsession(self.hass), api_key, "Lidl", address)
+        except besttime.BestTimeError as exc:
+            self._forecast_failures[store["id"]] = (api_key, dt_util.utcnow(), str(exc))
+            self._log("WARNING", f"Stoßzeiten von BestTime.app konnten nicht geladen werden: {exc}")
+            return {**busy, "forecast": forecast, "forecast_error": str(exc)}
+        self._forecast_failures.pop(store["id"], None)
+        forecast = {**new, "updated": dt_util.utcnow().isoformat()}
+        self._forecasts[store["id"]] = forecast
+        await self._forecast_store.async_save(self._forecasts)
+        self._log("INFO", f"Stoßzeiten von BestTime.app geladen: {forecast['venue_name']}")
+        return {**busy, "forecast": forecast}
 
     def _fetch_all(self) -> dict[str, Any]:
         previous = self.data or {}
@@ -265,8 +312,13 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # 4. Offers of the chosen stores and leaflets, public data that is independent of the login
         offer_stores = self._offer_store_keys(stores)
-        # The weekly leaflets differ between the offer regions, the region of the first store is used
-        leaflet_region = self._leaflet_region(offer_stores)
+        # Region (for the leaflets) and opening hours of the first store, the store of the busy hours
+        directory = self._store_directory(offer_stores)
+        leaflet_region = (
+            {"region": directory["region"], "name": directory["region_name"], "store": offer_stores[0]}
+            if directory and directory.get("region") is not None
+            else None
+        )
         if self._sync_public_data(offer_stores, leaflet_region):
             cache = self.api.cached_data()
         offers = analytics.mark_bought_offers(
@@ -320,6 +372,7 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             KEY_OFFERS_FOR_YOU: [offer for offer in offers if offer["bought_products"]],
             KEY_LEAFLETS: leaflets,
             KEY_LEAFLET_REGION: leaflet_region,
+            KEY_BUSY_TIMES: self._busy_times(offer_stores, directory, stores, tickets),
             KEY_DATA_VERSION: dt_util.utcnow().isoformat(),
             KEY_COUPONS: coupons,
             KEY_COUPONS_AVAILABLE: len(coupons) - activated,
@@ -338,22 +391,40 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return list(configured)
         return [stores[0]["id"]] if stores and stores[0]["id"] else []
 
-    def _leaflet_region(self, store_keys: list[str]) -> dict | None:
-        """Offer region of the first store like {"region": 10, "name": "Grevenbroich", "store": "DE1234"}"""
+    def _store_directory(self, store_keys: list[str]) -> dict | None:
+        """Address, offer region and opening hours of the first store (checked again once a week)"""
         if not store_keys:
             return None
         try:
-            # Looked up in the store directory of lidl.de only every 30 days, kept in the cache
-            region = self.api.leaflet_region(store_keys[0])
+            directory = self.api.store_directory(store_keys[0])
         except Exception as exc:  # noqa: BLE001
-            self._log("WARNING", f"Region der Prospekte konnte nicht ermittelt werden: {exc}")
+            self._log("WARNING", f"Details der Filiale {store_keys[0]} konnten nicht geladen werden: {exc}")
             return None
-        if region is None:
+        if not directory or directory.get("region") is None:
             self._log(
                 "INFO", f"Region der Filiale {store_keys[0]} unbekannt, es werden die bundesweiten Prospekte geladen"
             )
+        return directory
+
+    @staticmethod
+    def _busy_times(
+        store_keys: list[str], directory: dict | None, stores: list[dict], tickets: list[dict]
+    ) -> dict | None:
+        """Opening hours and own shopping times of the first store, the forecast is added later"""
+        if not store_keys:
             return None
-        return {"region": region["region"], "name": region.get("name") or "", "store": store_keys[0]}
+        store = (directory or {}).get("store")
+        if not store:
+            # A store of the receipts, known without the store details
+            visited = next((entry for entry in stores if entry["id"] == store_keys[0]), None)
+            store = visited and {key: visited[key] for key in ("id", "name", "address", "postal_code", "locality")}
+        return {
+            "store": store,
+            "opening_hours": (directory or {}).get("opening_hours"),
+            "own": analytics.shopping_times(tickets, store_keys[0]),
+            "forecast": None,
+            "forecast_error": None,
+        }
 
     def _sync_public_data(self, store_keys: list[str], leaflet_region: dict | None) -> bool:
         """Add the offers of the stores and the leaflets to the cache, True if anything was added"""

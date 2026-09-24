@@ -61,9 +61,9 @@ class LidlPlusApi:  # pylint: disable=too-many-instance-attributes,too-many-publ
     _LEAFLETS_API = "https://endpoints.leaflets.schwarz/v4"
     # Upcoming leaflets may still be incomplete and are loaded again after this time
     _LEAFLET_RELOAD_INTERVAL = timedelta(hours=20)
-    # The public store directory of lidl.de tells the offer region of a store, it is checked again after this time
+    # The public store directory of lidl.de tells offer region and opening hours of a store, checked again weekly
     _STORE_DIRECTORY = "https://www.lidl.de/s/de-DE/filialen"
-    _OFFER_REGION_RECHECK = timedelta(days=30)
+    _STORE_DIRECTORY_RECHECK = timedelta(days=7)
     _APP = "com.lidlplus.app"
     _OS = "iOs"
     _TIMEOUT = 120
@@ -610,12 +610,11 @@ class LidlPlusApi:  # pylint: disable=too-many-instance-attributes,too-many-publ
         response.raise_for_status()
         return response.json()
 
-    def _lookup_offer_region(self, store_key):
-        """(region, name) of a store from the store directory of lidl.de (only Germany), None if it is not listed"""
+    def _directory_entry(self, store_key, store):
+        """Offer region and opening hours of a store in the store directory of lidl.de (only Germany)"""
         if self._country != "DE":
             return None
         number = int(re.sub(r"\D", "", store_key) or 0)
-        store = self.store(store_key) or {}
         city = str(store.get("locality") or "")
         paths = [analytics.url_slug(city)]
         state = self._directory_page(analytics.url_slug(store.get("province"))) if store.get("province") else None
@@ -625,34 +624,63 @@ class LidlPlusApi:  # pylint: disable=too-many-instance-attributes,too-many-publ
             if name and (city.lower() == name.lower() or city.lower().startswith(name.lower() + " ")):
                 paths.append(str(entry["url"]).rstrip("/").split("/filialen/", 1)[-1])
         for path in dict.fromkeys(filter(None, paths)):
-            for object_number, region in analytics.store_offer_regions(self._directory_page(path)).items():
+            for object_number, entry in analytics.store_directory_entries(self._directory_page(path)).items():
                 if int(re.sub(r"\D", "", object_number) or -1) == number:
-                    return region
+                    return entry
         return None
+
+    def store_directory(self, store_key):
+        """
+        Details of a store, kept in the cache and checked again once a week: {"store": {"id", "name",
+        "address", "postal_code", "locality"}, "region": 10, "region_name": "Grevenbroich",
+        "opening_hours": {"monday": [["07:00", "22:00"]], ..., "special": {...}}}. Offer region (the weekly
+        leaflets differ between the regions) and opening hours come from the store directory of lidl.de,
+        only for Germany, otherwise they are None. None if the store is not known at all.
+        """
+        with self._cache_lock:
+            cache = self._load_cache()
+            known = (cache.get("store_directory") or {}).get(store_key)
+            checked = analytics.parse_datetime((known or {}).get("checked"))
+            now = datetime.now(timezone.utc)
+            if checked and now - checked < self._STORE_DIRECTORY_RECHECK:
+                return known if known.get("store") else None
+            try:
+                store = self.store(store_key) or {}
+                entry = self._directory_entry(store_key, store) or {}
+            except (requests.RequestException, ValueError, TypeError, AttributeError, KeyError) as exc:
+                # Tried again with the next sync, the details found before stay valid
+                _LOGGER.warning("Could not load the details of store %s: %s", store_key, exc)
+                return known if known and known.get("store") else None
+            known = {
+                "store": (
+                    {
+                        "id": store_key,
+                        "name": store.get("name") or "",
+                        "address": store.get("address") or "",
+                        "postal_code": store.get("postalCode") or "",
+                        "locality": store.get("locality") or "",
+                    }
+                    if store
+                    else None
+                ),
+                "region": entry.get("region"),
+                "region_name": entry.get("region_name") or "",
+                "opening_hours": entry.get("opening_hours"),
+                "checked": now.isoformat(),
+            }
+            cache.setdefault("store_directory", {})[store_key] = known
+            self._save_cache(cache)
+            return known if known["store"] else None
 
     def leaflet_region(self, store_key):
         """
         Offer region of a store like {"region": 10, "name": "Grevenbroich"}: the weekly leaflets differ between
-        the regions. Taken from the store directory of lidl.de (only Germany) and kept in the cache for 30 days.
-        None if it is not known, then the national leaflets are used.
+        the regions (see store_directory). None if it is not known, then the national leaflets are used.
         """
-        with self._cache_lock:
-            cache = self._load_cache()
-            known = (cache.get("leaflet_regions") or {}).get(store_key)
-            checked = analytics.parse_datetime((known or {}).get("checked"))
-            now = datetime.now(timezone.utc)
-            if not checked or now - checked >= self._OFFER_REGION_RECHECK:
-                try:
-                    region = self._lookup_offer_region(store_key)
-                except (requests.RequestException, ValueError, TypeError, AttributeError, KeyError) as exc:
-                    # Tried again with the next sync, the region found before stays valid
-                    _LOGGER.warning("Could not find the offer region of store %s: %s", store_key, exc)
-                else:
-                    known = {"region": region[0] if region else None, "name": region[1] if region else ""}
-                    known["checked"] = now.isoformat()
-                    cache.setdefault("leaflet_regions", {})[store_key] = known
-                    self._save_cache(cache)
-            return known if known and known.get("region") is not None else None
+        details = self.store_directory(store_key)
+        if not details or details.get("region") is None:
+            return None
+        return {"region": details["region"], "name": details.get("region_name") or ""}
 
     def sync_leaflets(self, categories=None, region=None):
         """

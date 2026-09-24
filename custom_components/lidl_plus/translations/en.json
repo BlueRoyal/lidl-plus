@@ -43,14 +43,16 @@
   "options": {
     "step": {
       "init": {
-        "title": "Stores for the offers",
-        "description": "Choose the stores whose current and upcoming offers are loaded. Without a selection the store you visit most is used.",
+        "title": "Stores",
+        "description": "Choose the stores whose current and upcoming offers are loaded. The first store also sets the region of the leaflets and the store of the busy hours. Without a selection the store you visit most is used.",
         "data": {
           "offer_stores": "Stores",
-          "search": "Search further stores"
+          "search": "Search further stores",
+          "besttime_api_key": "Private API key of BestTime.app (optional)"
         },
         "data_description": {
-          "search": "City, postal code or street. The stores found are added to the list, select them and save."
+          "search": "City, postal code or street. The stores found are added to the list, select them and save.",
+          "besttime_api_key": "For the busy hours of the store: create an account on besttime.app and enter the private API key. A forecast costs 2 credits and is renewed every 3 weeks."
         }
       }
     },
@@ -87,7 +89,8 @@
       "offers_current": { "name": "Current offers" },
       "offers_upcoming": { "name": "Upcoming offers" },
       "offers_for_you": { "name": "Offers for articles you bought" },
-      "leaflets": { "name": "Leaflets" }
+      "leaflets": { "name": "Leaflets" },
+      "store_busyness": { "name": "Store busyness" }
     }
   },
   "selector": {

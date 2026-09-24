@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from .const import (
     CONF_REFRESH_TOKEN,
     KEY_AVERAGE_BASKET,
+    KEY_BUSY_TIMES,
     KEY_CATEGORY_FOOD_SPENDING,
     KEY_CATEGORY_NONFOOD_SPENDING,
     KEY_COUPONS,
@@ -62,6 +63,12 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: LidlPlu
         "loyalty_id_error": coordinator.loyalty_error,
         # Without the region the national leaflets are shown (the name of the region is left out, it is personal)
         "leaflet_region_known": bool(data.get(KEY_LEAFLET_REGION)),
+        # The API key of BestTime.app is an option and never part of the diagnostics
+        "busy_times": {
+            "opening_hours_known": bool((data.get(KEY_BUSY_TIMES) or {}).get("opening_hours")),
+            "forecast": bool((data.get(KEY_BUSY_TIMES) or {}).get("forecast")),
+            "forecast_error": (data.get(KEY_BUSY_TIMES) or {}).get("forecast_error"),
+        },
         "summary": {key: data.get(key) for key in _SUMMARY_KEYS},
         "counts": {
             "receipts": len(receipts),

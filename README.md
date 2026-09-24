@@ -260,11 +260,13 @@ A fully featured Home Assistant custom integration is included in `custom_compon
   - **Artikel**: all products with purchase stats, savings, price trend badges, filter by trend/period, detail modal with price history line chart
   - **Angebote**: current and upcoming offers of your stores, marked if you bought the article before
   - **Prospekte**: current and upcoming leaflets of the offer region of your store with PDF, pages and products, and a search across leaflets, offers and your purchases
+  - **Stoßzeiten**: busy hours of your store per weekday and hour like on Google, with its opening hours and the hours at which you went shopping
   - **Export** button: download everything as ZIP or a single table as CSV
 - **Offers and leaflets are kept**: every offer and leaflet seen stays in the cache, also after it ended
 - **REST API** for AI assistants and other programs, see below
 - **Services**: `lidl_plus.sync` (force refresh), `lidl_plus.activate_all_coupons` (returns the activated coupons), `lidl_plus.export` (writes the data to `/config/lidl_plus_export/`, e.g. for a weekly automation)
-- **Configure** chooses the stores whose offers are loaded (from your receipts or by searching a city, postal code or street), without a choice the store you visit most is used
+- **Configure** chooses the stores whose offers are loaded (from your receipts or by searching a city, postal code or street), without a choice the store you visit most is used. The first store also sets the region of the leaflets and the store of the busy hours
+- **Busy hours** (optional): Google offers no interface for its busy hours, so they come from [BestTime.app](https://besttime.app): create an account and enter its private API key under *Configure*. A forecast costs 2 credits, it is renewed every 3 weeks and kept in Home Assistant; the sensor *Store busyness* shows the expected busyness of the current hour. Without key the panel shows the opening hours of the store (from lidl.de) and the hours at which you went shopping
 - **Re-authentication**: if Lidl rejects the refresh token, Home Assistant asks for a new one. Country, language and token can be changed with *Reconfigure*
 - Refresh tokens replaced by the auth server are saved automatically, several Lidl Plus accounts can be added
 - Data auto-refreshes every 6 hours. If Lidl cannot be reached, the receipts from the local cache are shown and the error appears in the *Last error* sensor
@@ -309,6 +311,7 @@ curl -H "Authorization: Bearer $TOKEN" -OJ "http://homeassistant.local:8123/api/
 | `/spending?from=2026-01-01&to=2026-06-30` | spending and savings of a period by month, store and category |
 | `/offers?status=upcoming` | offers: `active` (default), `current`, `upcoming`, `expired`, `all`; `bought=true` for articles bought before |
 | `/leaflets`, `/leaflets/{id}` | leaflets (same `status` values), a single one with the text of every page and its products |
+| `/busy_times` | opening hours and busy hours of the store (BestTime.app), `busyness_now`, and the hours of your own receipts |
 | `/coupons`, `/stores`, `/accounts` | coupons, stores of the receipts and of the offers, configured accounts (`entry_id=` selects the account) |
 | `/export?dataset=items&format=csv` | download: `all` (ZIP), `receipts`, `items`, `products`, `offers`, `leaflets` as CSV or JSON |
 
@@ -344,6 +347,7 @@ cd tests/frontend && npm ci && npm test # the sidebar panel (panel.js and index.
 - Offers of the chosen stores (current and announced) and the leaflets of their offer region (the weekly leaflets differ from region to region) with their pages and products, all of them kept in the cache as history; sensors for current, upcoming and "bought before" offers and for the leaflets; *Configure* chooses the stores
 - Panel tabs *Angebote* and *Prospekte* with a search across leaflets, offers and your purchases; export button (ZIP or CSV)
 - REST API with OpenAPI description for AI assistants and other programs (`/api/lidl_plus/...`, authentication with an access token)
+- Busy hours of the store: panel tab *Stoßzeiten* and sensor *Store busyness* with the forecast of BestTime.app (optional API key), opening hours from the store directory of lidl.de and the hours of your own receipts
 - Service `lidl_plus.export`
 
 **Security & robustness**

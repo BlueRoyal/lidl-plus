@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from lidlplus import analytics
-from sample_data import Receipt, directory_page, flyer, item, leaflet, leaflet_overview, offer, ticket
+from sample_data import OPENING_HOURS, Receipt, directory_page, flyer, item, leaflet, leaflet_overview, offer, ticket
 
 
 @pytest.mark.parametrize(
@@ -577,3 +577,39 @@ def test_soft_hyphens_in_leaflets():
     assert details["products"][0]["title"] == "Kartoffelsalat"
     leaflet_entry = {**analytics.normalize_leaflet(WEEKLY), **details}
     assert analytics.search_leaflets([leaflet_entry], "kartoffelsalat")[0]["pages"][0]["number"] == 1
+
+
+def test_store_directory_entries():
+    page = directory_page(
+        stores=[("DE01234", 10, "Grevenbroich", OPENING_HOURS), ("DE01234", 10, None), ("DE04711", 42, "Kerpen")]
+    )
+    entries = analytics.store_directory_entries(page)
+    assert entries["DE01234"]["region"] == 10
+    assert entries["DE01234"]["opening_hours"] == {
+        "monday": [["07:00", "22:00"]],
+        "tuesday": [["07:00", "22:00"]],
+        "wednesday": [["07:00", "22:00"]],
+        "thursday": [["07:00", "22:00"]],
+        "friday": [["07:00", "22:00"]],
+        "saturday": [["07:00", "21:00"]],
+        "sunday": [],
+        "special": {"2026-10-03": []},
+    }
+    assert entries["DE04711"] == {"region": 42, "region_name": "Kerpen", "opening_hours": None}
+    assert analytics.opening_hours(None)["monday"] == []
+
+
+def test_shopping_times():
+    tickets = [
+        ticket("t1", "2026-09-19T17:01:49", 10),
+        ticket("t2", "2026-09-12T17:45:00", 5),
+        ticket("t3", "2026-09-14T08:10:00+02:00", 5, store_id="DE9999"),
+        ticket("t4", "", 5),
+    ]
+    times = analytics.shopping_times(tickets, "DE1234")
+    assert (times["store"], times["receipts"]) == ("DE1234", 2)
+    # Saturday 17:00, the receipts are in local time
+    assert times["hours"][5][17] == 2
+    assert sum(map(sum, times["hours"])) == 2
+    everything = analytics.shopping_times(tickets)
+    assert (everything["receipts"], everything["hours"][0][8]) == (3, 1)
