@@ -101,10 +101,19 @@ window.eval(code);
   await tick();
   assert.deepStrictEqual([posted.at(-1).msg.id, posted.at(-1).msg.error], [10, "Connection lost"]);
   for (const type of ["lidl_plus/articles", "lidl_plus/article", "lidl_plus/article_save", "lidl_plus/article_delete",
-    "lidl_plus/barcode", "lidl_plus/article_image", "lidl_plus/article_image_delete", "zone/create"]) {
+    "lidl_plus/barcode", "lidl_plus/article_image", "lidl_plus/article_image_delete", "lidl_plus/article_leaflet", "zone/create"]) {
     fromPage({ type: "lidl-plus:call", id: 20, request: { type } });
     await tick();
     assert.strictEqual(calls.at(-1).type, type);
+  }
+  // Every command the page sends is passed on
+  const page = fs.readFileSync(path.join(__dirname, "..", "..", "custom_components", "lidl_plus", "frontend", "index.html"), "utf8");
+  const used = [...new Set([...page.matchAll(/wsCall\('([^']+)'/g)].map((match) => match[1]))];
+  assert.ok(used.length >= 10, used.join());
+  for (const type of used) {
+    fromPage({ type: "lidl-plus:call", id: 21, request: { type } });
+    await tick();
+    assert.strictEqual(calls.at(-1).type, type, `panel.js does not pass on ${type}`);
   }
 
   // Barcode scanner: without the Home Assistant app the page scans itself

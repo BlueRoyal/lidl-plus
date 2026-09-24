@@ -86,10 +86,12 @@ def _page_texts(pages):
     return texts
 
 
+def _significant_words(text):
+    return list(dict.fromkeys(word for word in _words(text) if len(word) > 2 and word not in _FILLER_WORDS))
+
+
 def _offer_words(offer):
-    return list(
-        dict.fromkeys(word for word in _words(offer.get("title")) if len(word) > 2 and word not in _FILLER_WORDS)
-    )
+    return _significant_words(offer.get("title"))
 
 
 def _mentioned(words, text):
@@ -132,6 +134,21 @@ def offers_of_leaflet(leaflet, offers):
         if pages:
             found.append({**offer, "pages": sorted(pages)})
     return sorted(found, key=lambda offer: (-len(offer["pages"]), offer["pages"][0], offer_name(offer)))
+
+
+def articles_of_leaflet(leaflet, article_list):
+    """
+    The articles (see merge_user_data) printed on the pages of a leaflet, found by their name like the offers, with
+    the numbers of these pages (key "pages"). Meant for articles named by hand, the names of receipts are too short.
+    """
+    texts = _page_texts(leaflet.get("pages"))
+    found = []
+    for article in article_list if texts else []:
+        words = _significant_words(article.get("name"))
+        pages = [number for number, text in texts.items() if _mentioned(words, text)]
+        if pages:
+            found.append({**article, "pages": sorted(pages)})
+    return found
 
 
 def _price_trend(history):
@@ -336,6 +353,19 @@ def _has_nutrition(article):
     return any(article.get("nutrition", {}).get(nutrient) is not None for nutrient in NUTRIENTS)
 
 
+def _linked_leaflets(leaflets, links):
+    """The leaflets of an article with the pages it was added to by hand (key "added_pages")"""
+    leaflets = [dict(entry) for entry in leaflets]
+    for link in links or []:
+        pages = sorted(set(link.get("pages") or []))
+        entry = next((entry for entry in leaflets if entry["id"] == link.get("id")), None)
+        if entry is None:
+            entry = {**_leaflet_summary(link, []), "status": analytics.leaflet_status(link)}
+            leaflets.insert(0, entry)
+        entry.update(pages=sorted(set(entry["pages"]) | set(pages)), added_pages=pages)
+    return leaflets
+
+
 def merge_user_data(catalog, user_data):
     """
     The articles of the catalog with the details added by hand (user_data by article key), and the articles added
@@ -352,6 +382,11 @@ def merge_user_data(catalog, user_data):
                 article[field] = data[field]
         # A picture of another database (like Open Food Facts), if Lidl has none
         article["image"] = article["image"] or data.get("image") or ""
+        if data.get("leaflets"):
+            # Leaflets the article was found in by hand
+            article["leaflets"] = _linked_leaflets(article["leaflets"], data["leaflets"])
+            if "leaflets" not in article["sources"]:
+                article["sources"] = [*article["sources"], "leaflets"]
         article.update(
             barcodes=list(data.get("barcodes") or []),
             package_size=data.get("package_size") or "",
@@ -364,7 +399,7 @@ def merge_user_data(catalog, user_data):
             updated=data.get("updated") or "",
             # Anything added by hand, also a name instead of the one of Lidl
             has_details=any(
-                data.get(field) for field in (*USER_TEXT_FIELDS, "barcodes", "nutrition", "images", "image")
+                data.get(field) for field in (*USER_TEXT_FIELDS, "barcodes", "nutrition", "images", "image", "leaflets")
             ),
         )
         articles[key] = article

@@ -362,6 +362,32 @@
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════════════
+     ARTIKEL EINER PROSPEKTSEITE ZUORDNEN
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay fixed inset-0 bg-black/50 z-[70] items-center justify-center p-4"
+     id="pickModal" onclick="closeModal(event)">
+  <div class="bg-white rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
+    <div class="flex items-start justify-between px-6 pt-5 pb-3 sticky top-0 bg-white rounded-t-2xl border-b border-gray-100 z-10">
+      <h2 class="text-base font-bold text-[#003882] pr-4 leading-tight" id="pickTitle">Artikel zuordnen</h2>
+      <button class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0 mt-[-2px]"
+              onclick="closePickModal()" aria-label="Schließen">×</button>
+    </div>
+    <div class="px-6 pb-6 pt-4">
+      <p id="pickInfo" class="text-xs text-gray-500 mb-2"></p>
+      <form id="pickForm" class="flex gap-2" onsubmit="searchPick(event)">
+        <input type="search" id="pickSearch" autocomplete="off" placeholder="Artikel suchen, z. B. Skyr"
+               class="flex-1 min-w-0 border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]">
+        <button type="submit" class="btn btn-primary !text-sm !px-4">Suchen</button>
+      </form>
+      <div id="pickResults" class="mt-2"></div>
+      <p class="text-xs text-gray-500 mt-4 mb-1">Nicht dabei?</p>
+      <button type="button" class="btn !text-sm !py-2" onclick="createFromPick()">＋ Als neuen Artikel anlegen</button>
+      <p id="pickStatus" class="text-xs text-gray-500 mt-2"></p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
      BARCODE SCANNEN
 ══════════════════════════════════════════════════════════════════════════ -->
 <div class="modal-overlay fixed inset-0 bg-black/50 z-[70] items-center justify-center p-4"
@@ -928,8 +954,10 @@ const INPUT = 'w-full border border-gray-200 rounded-xl px-3 py-2 outline-none f
 let articleResults = [], articleTotal = 0, articleRequest = 0, articleTimer = null;
 // The list comes from the article database once its tab was shown, until then the bought articles are shown
 let articlesFromServer = false, articlesStale = false;
-// Article of the dialog, its barcodes while they are edited, and values taken from another database
-let currentArticle = null, editBarcodes = [], pendingSources = {}, pendingImage = '', articleDialogRequest = 0;
+// Article of the dialog, its barcodes while they are edited, values taken from another database, and the page of a
+// leaflet a new article is added to when it is saved
+let currentArticle = null, editBarcodes = [], pendingSources = {}, pendingImage = '', pendingLeaflet = null;
+let articleDialogRequest = 0;
 
 // Only the photos of the integration, with their signed address
 const imageUrl = u => /^\/api\/lidl_plus\/images\/[0-9a-f]{32}(\?[\w.=&%-]*)?$/.test(String(u ?? '')) ? String(u) : '';
@@ -1019,8 +1047,12 @@ function renderArticles() {
   document.getElementById('productCount').textContent = `${articleResults.length} von ${articleTotal} Artikeln`;
   document.getElementById('productMore').classList.toggle('hidden', articleResults.length >= articleTotal);
   if (!articleResults.length) {
+    const query = document.getElementById('productSearch').value.trim();
     grid.className = 'text-center py-16 text-gray-400';
-    grid.textContent = 'Keine Artikel gefunden.';
+    grid.innerHTML = query && articlesFromServer
+      ? `<p>Kein Artikel gefunden für „${esc(query)}“.</p>
+         <button type="button" class="btn btn-primary !text-sm !px-4 !py-2 mt-3" data-create-article>＋ „${esc(query)}“ als neuen Artikel anlegen</button>`
+      : 'Keine Artikel gefunden.';
     return;
   }
   grid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3';
@@ -1075,6 +1107,10 @@ function renderArticleCard(a) {
 }
 
 document.getElementById('productGrid').addEventListener('click', event => {
+  if (event.target.closest('[data-create-article]')) {
+    newArticle({name: document.getElementById('productSearch').value.trim()});
+    return;
+  }
   const card = event.target.closest('[data-article-key]');
   if (card) openArticle(card.dataset.articleKey);
 });
@@ -1109,6 +1145,10 @@ function newArticle(prefill = {}) {
   });
   pendingSources = {...(prefill.sources || {})};
   pendingImage = prefill.image || '';
+  pendingLeaflet = prefill.leaflet || null;
+  if (pendingLeaflet) {
+    document.getElementById('articleFormStatus').textContent = `Wird nach dem Speichern auf Seite ${pendingLeaflet.page} des Prospekts ergänzt.`;
+  }
   if (prefill.source) {
     document.getElementById('articleFormStatus').textContent = `Angaben von ${prefill.source} – bitte prüfen und speichern.`;
   }
@@ -1120,6 +1160,7 @@ function renderArticle(a) {
   editBarcodes = [...(a.barcodes || [])];
   pendingSources = {};
   pendingImage = '';
+  pendingLeaflet = null;
   document.getElementById('modalTitle').textContent = a.key ? (a.name || a.key) : 'Neuer Artikel';
   document.getElementById('modalBrand').textContent = a.brand || '';
   document.getElementById('articleHead').innerHTML = a.loading && !a.product ? '' : renderArticleHead(a);
@@ -1147,11 +1188,16 @@ function renderArticleHead(a) {
       <span class="shrink-0">${o.status === 'expired' ? `<span class="badge bg-gray-100 text-gray-500">bis ${fmtDate(o.end)}</span>` : validity(o)}</span>
     </div>`).join('');
   const leaflets = (a.leaflets || []).map(l => `
-    <button type="button" class="w-full flex items-center gap-2 py-1.5 border-b border-gray-50 last:border-0 text-sm text-left hover:bg-gray-50" data-leaflet-id="${esc(l.id)}">
-      <span class="flex-1 min-w-0 truncate">${esc([l.name, l.title].filter(Boolean).join(' · '))}</span>
-      ${(l.pages || []).length ? `<span class="text-xs text-gray-400 shrink-0">S. ${l.pages.map(esc).join(', ')}</span>` : ''}
-      ${l.price != null ? `<span class="font-semibold text-[#003882] shrink-0">${fmt(l.price)}</span>` : ''}
-    </button>`).join('');
+    <div class="flex items-center gap-2 border-b border-gray-50 last:border-0">
+      <button type="button" class="flex-1 min-w-0 flex items-center gap-2 py-1.5 text-sm text-left hover:bg-gray-50" data-leaflet-id="${esc(l.id)}">
+        <span class="flex-1 min-w-0 truncate">${esc([l.name, l.title].filter(Boolean).join(' · '))}</span>
+        ${(l.added_pages || []).length ? '<span class="text-[10px] text-[#003882] shrink-0">von dir ergänzt</span>' : ''}
+        ${(l.pages || []).length ? `<span class="text-xs text-gray-400 shrink-0">S. ${l.pages.map(esc).join(', ')}</span>` : ''}
+        ${l.price != null ? `<span class="font-semibold text-[#003882] shrink-0">${fmt(l.price)}</span>` : ''}
+      </button>
+      ${(l.added_pages || []).length ? `<button type="button" class="text-xs text-red-600 px-1 shrink-0" data-unlink-leaflet="${esc(l.id)}"
+        title="Zuordnung zum Prospekt entfernen" aria-label="Zuordnung zum Prospekt entfernen">✕</button>` : ''}
+    </div>`).join('');
   const url = safeUrl(a.url);
   return `<div class="flex gap-4 mb-4">
       ${image ? `<img src="${esc(image)}" alt="" referrerpolicy="no-referrer" class="w-24 h-24 object-contain shrink-0 rounded-xl bg-gray-50">` : ''}
@@ -1167,7 +1213,20 @@ function renderArticleHead(a) {
 }
 
 // A leaflet of the article opens the leaflet dialog, which lies below this one
-document.getElementById('articleHead').addEventListener('click', event => {
+document.getElementById('articleHead').addEventListener('click', async event => {
+  const unlink = event.target.closest('[data-unlink-leaflet]');
+  if (unlink) {
+    if (!armed(unlink, 'Entfernen?')) return;
+    try {
+      const saved = await wsCall('lidl_plus/article_leaflet', {key: currentArticle.key, leaflet_id: unlink.dataset.unlinkLeaflet, remove: true});
+      renderArticle(saved);
+      document.getElementById('articleFormStatus').textContent = '✓ Aus dem Prospekt entfernt';
+      reloadLeaflet();
+    } catch (err) {
+      document.getElementById('articleFormStatus').textContent = '⚠️ ' + err.message;
+    }
+    return;
+  }
   const leaflet = event.target.closest('[data-leaflet-id]');
   if (!leaflet) return;
   closeProductModal();
@@ -1364,10 +1423,13 @@ async function saveArticle(event) {
     return;
   }
   status.textContent = 'Speichere…';
+  const leaflet = a.key ? null : pendingLeaflet;
   try {
-    const saved = await wsCall('lidl_plus/article_save', fields);
+    let saved = await wsCall('lidl_plus/article_save', fields);
+    if (leaflet) saved = await wsCall('lidl_plus/article_leaflet', {key: saved.key, ...leaflet});
     renderArticle(saved);
-    document.getElementById('articleFormStatus').textContent = '✓ Gespeichert';
+    document.getElementById('articleFormStatus').textContent = leaflet ? `✓ Gespeichert und auf Seite ${leaflet.page} ergänzt` : '✓ Gespeichert';
+    if (leaflet) reloadLeaflet(`✓ ${saved.name} auf Seite ${leaflet.page} ergänzt`);
     if (articlesFromServer) loadArticles();
   } catch (err) {
     status.textContent = '⚠️ ' + err.message;
@@ -1695,13 +1757,14 @@ function renderScanResult(result) {
     ${product ? renderScannedProduct(product) : `<p class="text-xs text-gray-500 mb-3">${esc(result.lookup_error
       ? 'Open Food Facts ist nicht erreichbar: ' + result.lookup_error
       : 'Auch Open Food Facts kennt ihn nicht – die Angaben kannst du selbst eintragen.')}</p>`}
-    <button type="button" class="btn btn-primary !text-sm !px-4 !py-2" onclick="createFromScan()">＋ Als neuen Artikel anlegen</button>
-    <h3 class="section-title mt-5">Oder einem vorhandenen Artikel zuordnen</h3>
+    <h3 class="section-title mt-4">Zu welchem Artikel gehört er?</h3>
     <form class="flex gap-2" onsubmit="searchLinkCandidates(event)">
-      <input type="search" id="linkSearch" placeholder="Artikel suchen, z. B. Skyr" class="${INPUT}">
+      <input type="search" id="linkSearch" autocomplete="off" placeholder="Artikel suchen, z. B. Skyr" class="${INPUT}">
       <button type="submit" class="btn">Suchen</button>
     </form>
-    <div id="linkResults" class="mt-2"></div>`;
+    <div id="linkResults" class="mt-2"></div>
+    <p class="text-xs text-gray-500 mt-4 mb-1">Nicht dabei?</p>
+    <button type="button" class="btn btn-primary !text-sm !px-4 !py-2" onclick="createFromScan()">＋ Als neuen Artikel anlegen</button>`;
 }
 
 function renderScannedProduct(p) {
@@ -1830,6 +1893,7 @@ function closeModal(e) {
   if (e.target.id === 'productModal') closeProductModal();
   else if (e.target.id === 'leafletModal') closeLeafletModal();
   else if (e.target.id === 'scanModal') closeScanModal();
+  else if (e.target.id === 'pickModal') closePickModal();
 }
 
 // Escape closes the dialog on top
@@ -1837,6 +1901,7 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   const open = id => document.getElementById(id).classList.contains('open');
   if (open('scanModal')) closeScanModal();
+  else if (open('pickModal')) closePickModal();
   else if (open('productModal')) closeProductModal();
   else closeLeafletModal();
 });
@@ -1961,6 +2026,7 @@ async function openLeaflet(id) {
   try {
     const leaflet = await wsCall('lidl_plus/leaflet', {leaflet_id: id});
     if (request !== leafletRequest) return; // closed or another leaflet opened meanwhile
+    currentLeaflet = leaflet;
     document.getElementById('leafletTitle').textContent = [leaflet.name, leaflet.title].filter(Boolean).join(' · ') || 'Prospekt';
     body.innerHTML = renderLeafletDetails(leaflet);
   } catch (err) {
@@ -1970,9 +2036,10 @@ async function openLeaflet(id) {
 }
 
 function renderLeafletDetails(l) {
-  const pages = l.pages || [], products = l.products || [], offers = l.offers || [];
+  const pages = l.pages || [], products = l.products || [], offers = l.offers || [], articles = l.articles || [];
   const pdf = safeUrl(l.pdf), url = safeUrl(l.url);
   return `
+    <p id="leafletStatus" class="text-xs text-green-700 mb-2 empty:hidden"></p>
     <div class="flex flex-wrap items-center gap-2 mb-4">
       ${validity(l)}
       ${pdf ? `<a class="btn" href="${esc(pdf)}" ${EXTERNAL}>📄 PDF</a>` : ''}
@@ -1980,22 +2047,28 @@ function renderLeafletDetails(l) {
     </div>
     ${offers.length ? `<h3 class="section-title">Angebote der Lidl Plus App in diesem Prospekt (${offers.length})</h3>
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-5">${offers.map(renderLeafletOffer).join('')}</div>` : ''}
-    ${!offers.length && !products.length ? `<p class="text-xs text-gray-500 mb-4">Zu diesem Prospekt liefert Lidl keine Produktdaten, die Artikel stehen nur auf den Seiten.
-      Einen Artikel kannst du unter 📦 Artikel → ＋ Neuer Artikel selbst anlegen.</p>` : ''}
+    ${articles.length ? `<h3 class="section-title">Aus deiner Artikeldatenbank (${articles.length})</h3>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-5">${articles.map(renderLeafletArticle).join('')}</div>` : ''}
+    ${!offers.length && !products.length ? `<p class="text-xs text-gray-500 mb-4">Zu diesem Prospekt liefert Lidl keine Produktdaten, die Artikel stehen nur auf den Seiten.</p>` : ''}
     ${products.length ? `<h3 class="section-title">Produkte des Onlineshops (${products.length})</h3>
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-5">${products.map(renderLeafletProduct).join('')}</div>` : ''}
     ${pages.length ? `<h3 class="section-title">Seiten (${pages.length})</h3>
-      <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">${pages.map(renderPage).join('')}</div>`
+      <p class="text-xs text-gray-500 mb-2">Siehst du einen Artikel auf einer Seite? Mit „＋ Artikel“ darunter ergänzt du ihn aus deiner Artikeldatenbank oder legst ihn neu an.</p>
+      <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">${pages.map(page => renderPage(page, true)).join('')}</div>`
       : '<p class="text-center py-6 text-gray-400">Für diesen Prospekt sind keine Seiten gespeichert.</p>'}`;
 }
 
-function renderPage(page) {
+// A page of a leaflet; in the leaflet dialog with a button to add an article of the page
+function renderPage(page, assign = false) {
   const image = safeUrl(page.image), preview = safeUrl(page.thumbnail) || image;
   const label = `<div class="text-[11px] text-gray-400 text-center mt-0.5">Seite ${esc(page.number)}</div>`;
-  if (!image) return `<div>${label}</div>`;
-  return `<a href="${esc(image)}" ${EXTERNAL} title="${esc(page.description)}" class="block">
+  const button = assign
+    ? `<button type="button" class="btn !text-[11px] !px-2 !py-0.5 w-full justify-center mt-1" data-assign-page="${esc(page.number)}">＋ Artikel</button>`
+    : '';
+  if (!image) return `<div>${label}${button}</div>`;
+  return `<div><a href="${esc(image)}" ${EXTERNAL} title="${esc(page.description)}" class="block">
     <img src="${esc(preview)}" alt="${esc(page.description)}" loading="lazy" referrerpolicy="no-referrer"
-         class="w-full rounded-lg border border-gray-100 bg-gray-50">${label}</a>`;
+         class="w-full rounded-lg border border-gray-100 bg-gray-50">${label}</a>${button}</div>`;
 }
 
 // A product of the online shop, it opens its article (with the link to the online shop)
@@ -2028,10 +2101,111 @@ function renderLeafletOffer(o) {
   </div>`;
 }
 
+// An article of the database on the pages of a leaflet: added by hand or found by its name
+function renderLeafletArticle(a) {
+  const image = safeUrl(a.image);
+  const pages = (a.pages || []).map(esc).join(', ');
+  return `<div class="bg-gray-50 rounded-xl p-2 hover:bg-gray-100 cursor-pointer" data-article-key="${esc(a.key)}">
+    ${image ? `<img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="h-24 w-full object-contain mb-1.5">` : ''}
+    ${a.brand ? `<div class="text-[10px] uppercase text-gray-400 truncate">${esc(a.brand)}</div>` : ''}
+    <div class="text-xs font-semibold text-gray-800 line-clamp-2">${esc(a.name || a.key)}</div>
+    <div class="flex items-baseline justify-between gap-1 mt-1">
+      <span class="text-[10px] ${a.added ? 'text-[#003882]' : 'text-gray-400'}">${a.added ? 'von dir ergänzt' : 'am Namen erkannt'}</span>
+      ${pages ? `<span class="text-[10px] text-gray-400">S. ${pages}</span>` : ''}
+    </div>
+  </div>`;
+}
+
 document.getElementById('leafletBody').addEventListener('click', event => {
+  const assign = event.target.closest('[data-assign-page]');
+  if (assign) return openPicker(+assign.dataset.assignPage);
   const card = event.target.closest('[data-article-key]');
   if (card && card.dataset.articleKey) openArticle(card.dataset.articleKey);
 });
+
+// Loads the leaflet of the dialog again, e.g. after an article was added to a page
+async function reloadLeaflet(message) {
+  if (!currentLeaflet || !document.getElementById('leafletModal').classList.contains('open')) return;
+  const request = ++leafletRequest;
+  try {
+    const leaflet = await wsCall('lidl_plus/leaflet', {leaflet_id: currentLeaflet.id});
+    if (request !== leafletRequest) return;
+    currentLeaflet = leaflet;
+    document.getElementById('leafletBody').innerHTML = renderLeafletDetails(leaflet);
+    if (message) document.getElementById('leafletStatus').textContent = message;
+  } catch (err) {
+    if (request === leafletRequest) document.getElementById('leafletStatus').textContent = '⚠️ ' + err.message;
+  }
+}
+
+// ── Artikel einer Prospektseite zuordnen ──────────────────────────────────────
+let currentLeaflet = null, pickPage = null, pickRequest = 0;
+
+function openPicker(page) {
+  if (!currentLeaflet) return;
+  pickPage = page;
+  pickRequest++;
+  document.getElementById('pickTitle').textContent = `Artikel auf Seite ${page}`;
+  document.getElementById('pickInfo').textContent =
+    `${[currentLeaflet.name, currentLeaflet.title].filter(Boolean).join(' · ')}: Welcher Artikel ist auf dieser Seite? Suche ihn in deiner Artikeldatenbank.`;
+  document.getElementById('pickSearch').value = '';
+  document.getElementById('pickResults').innerHTML = '';
+  document.getElementById('pickStatus').textContent = '';
+  document.getElementById('pickModal').classList.add('open');
+  document.getElementById('pickSearch').focus();
+}
+
+function closePickModal() {
+  pickRequest++;
+  document.getElementById('pickModal').classList.remove('open');
+}
+
+async function searchPick(event) {
+  if (event) event.preventDefault();
+  const query = document.getElementById('pickSearch').value.trim();
+  const box = document.getElementById('pickResults');
+  if (!query) {
+    box.innerHTML = '';
+    return;
+  }
+  const request = ++pickRequest;
+  box.innerHTML = '<p class="text-xs text-gray-400">Suche…</p>';
+  try {
+    const result = await wsCall('lidl_plus/articles', {query, limit: 15});
+    if (request !== pickRequest) return;
+    box.innerHTML = (result.articles || []).length
+      ? result.articles.map(renderLinkRow).join('')
+      : '<p class="text-xs text-gray-400">Kein Artikel gefunden – lege ihn unten neu an.</p>';
+  } catch (err) {
+    if (request === pickRequest) box.innerHTML = `<p class="text-xs text-red-600">${esc(err.message)}</p>`;
+  }
+}
+
+document.getElementById('pickResults').addEventListener('click', event => {
+  const row = event.target.closest('[data-link-key]');
+  if (row) assignToPage(row.dataset.linkKey);
+});
+
+async function assignToPage(key) {
+  const status = document.getElementById('pickStatus');
+  const page = pickPage;
+  status.textContent = 'Speichere…';
+  try {
+    const article = await wsCall('lidl_plus/article_leaflet', {key, leaflet_id: currentLeaflet.id, page});
+    closePickModal();
+    await reloadLeaflet(`✓ ${article.name || key} auf Seite ${page} ergänzt`);
+  } catch (err) {
+    status.textContent = '⚠️ ' + err.message;
+  }
+}
+
+// A new article of the page, named like the search; it is added to the page when it is saved
+function createFromPick() {
+  const name = document.getElementById('pickSearch').value.trim();
+  const leaflet = {leaflet_id: currentLeaflet.id, page: pickPage};
+  closePickModal();
+  newArticle({name, leaflet});
+}
 
 // Search in the articles bought before, the offers and the pages and products of the leaflets
 async function searchAll(event) {
@@ -2092,7 +2266,7 @@ function renderSearchResults(result, query) {
           <button class="font-semibold text-[#003882] hover:underline text-left" data-leaflet-id="${esc(l.id)}">${esc([l.name, l.title].filter(Boolean).join(' · '))}</button>
           ${validity(l)}
         </div>
-        ${pages.length ? `<div class="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2 mb-2">${pages.map(renderPage).join('')}</div>` : ''}
+        ${pages.length ? `<div class="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2 mb-2">${pages.map(page => renderPage(page)).join('')}</div>` : ''}
         ${products.length ? `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">${products.map(renderLeafletProduct).join('')}</div>` : ''}
       </div>`;
     }).join(''));

@@ -34,6 +34,7 @@ const PAGE_COMMANDS = new Set([
   "lidl_plus/barcode",
   "lidl_plus/article_image",
   "lidl_plus/article_image_delete",
+  "lidl_plus/article_leaflet",
   // A zone around the store for the shopping duration, Home Assistant allows this to administrators only
   "zone/create",
 ]);

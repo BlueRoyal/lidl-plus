@@ -540,7 +540,34 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 {**offer, "packaging": articles.packaging(offer), "article_key": articles.offer_article_key(offer)}
                 for offer in found
             ],
+            "articles": await self._async_leaflet_articles(leaflet),
         }
+
+    async def _async_leaflet_articles(self, leaflet: dict[str, Any]) -> list[dict]:
+        """
+        The articles of the article database on the pages of a leaflet: the ones added to its pages by hand
+        ("added": True), and the ones named by hand whose name is printed on a page
+        """
+        store = article_store(self.hass)
+        details = await store.async_load()
+        merged = await store.async_articles((self.data or {}).get(KEY_CATALOG) or {})
+        on_pages: dict[str, dict] = {}
+        for key, data in details.items():
+            for link in data.get("leaflets") or []:
+                if link["id"] == leaflet["id"] and key in merged:
+                    on_pages[key] = {**articles.article_list_entry(merged[key]), "pages": link["pages"], "added": True}
+        named = [
+            article
+            for key, article in merged.items()
+            if key not in on_pages and ("own" in article["sources"] or article["name"] != article["lidl_name"])
+        ]
+        for article in await self.hass.async_add_executor_job(articles.articles_of_leaflet, leaflet, named):
+            on_pages[article["key"]] = {
+                **articles.article_list_entry(article),
+                "pages": article["pages"],
+                "added": False,
+            }
+        return sorted(on_pages.values(), key=lambda article: (article["pages"][0], article["name"].lower()))
 
     async def async_export(self, dataset: str, file_format: str) -> bytes:
         """Export file of the cache with the details of the articles added by hand, see export.export_file"""

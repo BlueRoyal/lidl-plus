@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ._lidlplus.articles import FILTERS, SORTS
+from ._lidlplus.articles import FILTERS, IMAGE_KINDS, NUTRIENTS, NUTRITION_BASES, SORTS
 
 API_PATH = "/api/lidl_plus"
 
@@ -29,6 +29,46 @@ _TO = _query("to", "Last day of the period (YYYY-MM-DD), included", {"type": "st
 _LIMIT = _query("limit", "Maximum number of results", {"type": "integer", "minimum": 0})
 _OFFSET = _query("offset", "Number of results to skip, for paging", {"type": "integer", "minimum": 0})
 _PAGED = "The response contains `total` (number of all matching entries), `offset`, `limit` and `results`."
+_KEY = _path("key", "Key of the article from /articles, e.g. nr:0082446")
+_ANSWER = "The answer is the article with all details, like /articles/{key}."
+_ARTICLE_BODY: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "name": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Name, needed for a new article. For an article of Lidl it replaces the name of Lidl, "
+            "an empty name brings it back",
+        },
+        "brand": {"type": "string", "maxLength": 100},
+        "package_size": {"type": "string", "maxLength": 100, "description": "e.g. 500 g or 6 x 1,5 l"},
+        "barcodes": {
+            "type": "array",
+            "items": {"type": "string"},
+            "maxItems": 20,
+            "description": "EAN/UPC barcodes, they replace the known ones; a barcode belongs to one article only",
+        },
+        "nutrition": {
+            "type": "object",
+            "properties": {nutrient: {"type": ["number", "null"], "minimum": 0} for nutrient in NUTRIENTS},
+            "description": "Nutrition values per 100 g or 100 ml, energy in kJ and kcal, the others in grams. "
+            "They replace all known values",
+        },
+        "nutrition_basis": {"type": "string", "enum": list(NUTRITION_BASES)},
+        "ingredients": {"type": "string", "maxLength": 10000, "description": "Ingredients, also of non-food articles"},
+        "notes": {"type": "string", "maxLength": 10000},
+        "image": {
+            "type": "string",
+            "description": "https address of a picture of the article, e.g. of Open Food Facts",
+        },
+        "sources": {
+            "type": "object",
+            "additionalProperties": {"type": "string"},
+            "description": 'Where values were taken from, e.g. {"nutrition": "Open Food Facts"}',
+        },
+    },
+    "additionalProperties": False,
+}
 
 # path: (operationId, summary, description, parameters)
 _OPERATIONS: dict[str, tuple[str, str, str, list[dict[str, Any]]]] = {
@@ -142,7 +182,9 @@ _OPERATIONS: dict[str, tuple[str, str, str, list[dict[str, Any]]]] = {
         "getLeaflet",
         "Single leaflet",
         "A leaflet with every page (number, printed words, description, image) and its products (title, brand, "
-        "price, description, link). Food offers are no products, they are only mentioned in the text of their page.",
+        "price, description, link). Food offers are no products, they are only mentioned in the text of their page: "
+        "`offers` are the offers of the Lidl Plus app found on the pages, `articles` the articles of the article "
+        "database added to a page by hand (`added`) or found by their name.",
         [_path("leaflet_id", "Leaflet id from /leaflets"), _ENTRY],
     ),
     "/search": (
@@ -215,6 +257,18 @@ _OPERATIONS: dict[str, tuple[str, str, str, list[dict[str, Any]]]] = {
             _OFFSET,
         ],
     ),
+    "/barcodes/{code}": (
+        "findBarcode",
+        "Find a barcode",
+        "The articles with a barcode (EAN/UPC) and, for an unknown barcode or with lookup=true, the product of Open "
+        "Food Facts, Open Beauty Facts or Open Products Facts (`product` with name, brand, quantity, nutrition values "
+        "per 100 g/ml, ingredients, Nutri-Score and picture) that can be taken for an article.",
+        [
+            _path("code", "The digits of the barcode"),
+            _query("lookup", "Look the barcode up also if an article has it", {"type": "boolean"}),
+            _ENTRY,
+        ],
+    ),
     "/articles/{key}": (
         "getArticle",
         "Single article",
@@ -252,27 +306,152 @@ _OPERATIONS: dict[str, tuple[str, str, str, list[dict[str, Any]]]] = {
 }
 
 
-def _operation(operation_id: str, summary: str, description: str, parameters: list[dict[str, Any]]) -> dict:
+def _json(schema: dict[str, Any]) -> dict[str, Any]:
+    return {"required": True, "content": {"application/json": {"schema": schema}}}
+
+
+_IMAGE_BODY = {
+    "required": True,
+    "content": {
+        **{
+            content_type: {"schema": {"type": "string", "format": "binary"}}
+            for content_type in ("image/jpeg", "image/png", "image/webp")
+        },
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string", "format": "binary"},
+                    "kind": {"type": "string", "enum": list(IMAGE_KINDS)},
+                },
+                "required": ["file"],
+            }
+        },
+    },
+}
+_LEAFLET_BODY = _json(
+    {
+        "type": "object",
+        "properties": {
+            "leaflet_id": {"type": "string", "description": "Leaflet id from /leaflets"},
+            "page": {"type": "integer", "minimum": 1, "description": "Number of the page"},
+        },
+        "required": ["leaflet_id", "page"],
+    }
+)
+
+# Changes of the article database: path, method, operationId, summary, description, parameters, request body
+_CHANGES: list[tuple[str, str, str, str, str, list[dict[str, Any]], dict[str, Any] | None]] = [
+    (
+        "/articles",
+        "post",
+        "addArticle",
+        "Add an article",
+        "Add an article that is not known yet (e.g. from a leaflet without product data), with its details. "
+        f"{_ANSWER}",
+        [_ENTRY],
+        _json({**_ARTICLE_BODY, "required": ["name"]}),
+    ),
+    (
+        "/articles/{key}",
+        "patch",
+        "changeArticle",
+        "Change an article",
+        "Add or change the details of an article: only the given fields are changed, empty values remove them. "
+        f"{_ANSWER}",
+        [_KEY, _ENTRY],
+        _json(_ARTICLE_BODY),
+    ),
+    (
+        "/articles/{key}",
+        "delete",
+        "deleteArticleDetails",
+        "Remove the details of an article",
+        "Remove every detail added by hand (barcodes, nutrition values, photos, ...). An article added by hand is "
+        "removed completely, the answer is then null.",
+        [_KEY, _ENTRY],
+        None,
+    ),
+    (
+        "/articles/{key}/images",
+        "post",
+        "addArticleImage",
+        "Add a photo to an article",
+        "A photo (JPEG, PNG or WebP, at most 2.5 MB) as body, or as field `file` of a form. `kind` tells what it "
+        f"shows: nutrition values, ingredients, the front or something else. {_ANSWER}",
+        [_KEY, _query("kind", "What the photo shows", {"type": "string", "enum": list(IMAGE_KINDS)}), _ENTRY],
+        _IMAGE_BODY,
+    ),
+    (
+        "/articles/{key}/images/{image_id}",
+        "delete",
+        "deleteArticleImage",
+        "Remove a photo of an article",
+        _ANSWER,
+        [_KEY, _path("image_id", "Id of the photo from images[] of the article"), _ENTRY],
+        None,
+    ),
+    (
+        "/articles/{key}/leaflets",
+        "post",
+        "addArticleToLeaflet",
+        "Add an article to a leaflet page",
+        "The article is printed on a page of a leaflet, but Lidl has no data about it. The leaflet lists the article "
+        f"in `articles`. {_ANSWER}",
+        [_KEY, _ENTRY],
+        _LEAFLET_BODY,
+    ),
+    (
+        "/articles/{key}/leaflets/{leaflet_id}",
+        "delete",
+        "removeArticleFromLeaflet",
+        "Remove an article from a leaflet",
+        f"From one page (query parameter page) or from all pages it was added to. {_ANSWER}",
+        [
+            _KEY,
+            _path("leaflet_id", "Leaflet id from /leaflets"),
+            _query("page", "Number of the page", {"type": "integer", "minimum": 1}),
+            _ENTRY,
+        ],
+        None,
+    ),
+]
+
+
+def _operation(
+    operation_id: str,
+    summary: str,
+    description: str,
+    parameters: list[dict[str, Any]],
+    body: dict[str, Any] | None = None,
+) -> dict:
     if operation_id == "exportData":
         content: dict[str, Any] = {"application/zip": {}, "text/csv": {}, "application/json": {}}
     elif operation_id == "getImage":
         content = {"image/jpeg": {}, "image/png": {}, "image/webp": {}}
     else:
         content = {"application/json": {"schema": {"type": ["object", "array"]}}}
-    responses: dict[str, Any] = {"200": {"description": summary, "content": content}}
-    if operation_id in ("listOffers", "listLeaflets", "search", "exportData", "listArticles"):
+    created = operation_id in ("addArticle", "addArticleImage")
+    responses: dict[str, Any] = {"201" if created else "200": {"description": summary, "content": content}}
+    if body or operation_id in ("listOffers", "listLeaflets", "search", "exportData", "listArticles", "findBarcode"):
         responses["400"] = {"description": "Invalid or missing parameter"}
     if operation_id != "listAccounts":
         responses["404"] = {"description": "No loaded Lidl Plus account, or the requested entry was not found"}
-    return {
-        "get": {
-            "operationId": operation_id,
-            "summary": summary,
-            "description": description,
-            "parameters": parameters,
-            "responses": responses,
-        }
+    if operation_id in ("addArticle", "changeArticle"):
+        responses["409"] = {"description": "A barcode belongs to another article already"}
+    if operation_id == "addArticleImage":
+        responses["409"] = {"description": "The article has 20 photos already"}
+        responses["413"] = {"description": "The photo is larger than 2.5 MB"}
+    operation = {
+        "operationId": operation_id,
+        "summary": summary,
+        "description": description,
+        "parameters": parameters,
+        "responses": responses,
     }
+    if body:
+        operation["requestBody"] = body
+    return operation
 
 
 def build_openapi() -> dict[str, Any]:
@@ -283,10 +462,20 @@ def build_openapi() -> dict[str, Any]:
             "title": "Lidl Plus",
             "version": "1.0.0",
             "description": "Receipts, articles, spending, offers, leaflets and coupons of the Lidl Plus accounts in "
-            "Home Assistant. Authenticate with a long-lived access token of Home Assistant: "
+            "Home Assistant, and the article database with barcodes, nutrition values, ingredients and photos, which "
+            "can be changed as well. Authenticate with a long-lived access token of Home Assistant: "
             "`Authorization: Bearer <token>`. Amounts are in euros, dates are ISO 8601.",
         },
         "components": {"securitySchemes": {"homeAssistant": {"type": "http", "scheme": "bearer"}}},
         "security": [{"homeAssistant": []}],
-        "paths": {f"{API_PATH}{path}": _operation(*operation) for path, operation in _OPERATIONS.items()},
+        "paths": _paths(),
     }
+
+
+def _paths() -> dict[str, dict[str, Any]]:
+    paths: dict[str, dict[str, Any]] = {}
+    for path, operation in _OPERATIONS.items():
+        paths.setdefault(f"{API_PATH}{path}", {})["get"] = _operation(*operation)
+    for path, method, *operation in _CHANGES:
+        paths.setdefault(f"{API_PATH}{path}", {})[method] = _operation(*operation)
+    return paths

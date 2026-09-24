@@ -278,7 +278,7 @@ A fully featured Home Assistant custom integration is included in `custom_compon
   - **Prospekte**: current and upcoming leaflets of the offer region of your store with PDF, pages, the products of the online shop and the offers of the Lidl Plus app printed on the pages, and a search across leaflets, offers and your purchases
   - **Stoßzeiten**: busy hours of your store per weekday and hour like on Google, with its opening hours, the hours at which you went shopping and how long your shopping takes
   - **Export** button: download everything as ZIP or a single table as CSV
-- **Article database**: every article you bought, every offer of the Lidl Plus app and every product of the leaflets, with purchases and price history, offers and leaflets. Add barcodes, package size, nutrition values, ingredients (also of non-food articles like cosmetics or cleaning agents), notes and photos, e.g. of the nutrition label. **Scan the barcode** with the Home Assistant app (its scanner opens) or in the browser with the camera (Chrome on Android) or by typing it: a known barcode opens its article, an unknown one is looked up in [Open Food Facts](https://world.openfoodfacts.org), Open Beauty Facts and Open Products Facts (only the barcode is sent) and can be added to an article or saved as a new one with the values found. The details belong to the household and are shared by all accounts; they are kept in `/config/.storage/lidl_plus_articles`, the photos in `/config/lidl_plus/images/` (both part of the Home Assistant backups and of the export)
+- **Article database**: every article you bought, every offer of the Lidl Plus app and every product of the leaflets, with purchases and price history, offers and leaflets. Add barcodes, package size, nutrition values, ingredients (also of non-food articles like cosmetics or cleaning agents), notes and photos, e.g. of the nutrition label. **Scan the barcode** with the Home Assistant app (its scanner opens) or in the browser with the camera (Chrome on Android) or by typing it: a known barcode opens its article, an unknown one is looked up in [Open Food Facts](https://world.openfoodfacts.org), Open Beauty Facts and Open Products Facts (only the barcode is sent) and belongs to the article you search for, or to a new one with the values found. Articles you see on a page of a leaflet are added with "＋ Artikel" below the page. The details belong to the household and are shared by all accounts; they are kept in `/config/.storage/lidl_plus_articles`, the photos in `/config/lidl_plus/images/` (both part of the Home Assistant backups and of the export)
 - **Shopping duration**: from the location history of the persons (Home Assistant companion app) the integration sees when you arrived at the store of a receipt and when you left, shown with the receipt, in the tab *Stoßzeiten* (average, by weekday) and as sensor *Last shopping duration*. The app reports its location reliably only when entering or leaving a zone, so create a zone around the store (the panel does it with one click). Home Assistant keeps locations for 10 days, so every visit is saved as soon as it is known; only the times of arrival and departure are kept, no locations
 - **Offers and leaflets are kept**: every offer and leaflet seen stays in the cache, also after it ended
 - **REST API** for AI assistants and other programs, see below
@@ -302,9 +302,9 @@ Requires Home Assistant 2025.3 or newer.
 
 The *Lidl Plus* panel appears in the sidebar, no `configuration.yaml` changes are needed.
 
-### REST API for AI assistants
+### REST API for AI assistants and apps
 
-All data of the integration can be read with a Home Assistant access token, e.g. by your own bot or an AI assistant. The API only reads, it cannot activate coupons or change anything (the details of the articles are changed in the panel).
+All data of the integration can be read with a Home Assistant access token, e.g. by your own bot, an AI assistant or an app. The article database can be changed as well (articles, their details, photos, barcodes and leaflet pages); coupons cannot be activated and nothing else can be changed.
 
 1. Create a user for the assistant (*Settings → People → Users*, no administrator) and log in with it once
 2. In its profile (*Security → Long-lived access tokens*) create a token
@@ -315,6 +315,17 @@ TOKEN=eyJhbGciOi...
 curl -H "Authorization: Bearer $TOKEN" http://homeassistant.local:8123/api/lidl_plus/summary
 curl -H "Authorization: Bearer $TOKEN" "http://homeassistant.local:8123/api/lidl_plus/search?q=kaffee"
 curl -H "Authorization: Bearer $TOKEN" -OJ "http://homeassistant.local:8123/api/lidl_plus/export?dataset=all"
+
+# The article database: find a barcode, add an article, add details and a photo
+curl -H "Authorization: Bearer $TOKEN" "http://homeassistant.local:8123/api/lidl_plus/barcodes/4056489123453"
+curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{"name": "Duschgel Sensitive", "brand": "Cien", "barcodes": ["4056489123453"]}' \
+     http://homeassistant.local:8123/api/lidl_plus/articles
+curl -X PATCH -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{"package_size": "500 g", "nutrition": {"energy_kcal": 63, "protein": 11}, "ingredients": "Magermilch"}' \
+     http://homeassistant.local:8123/api/lidl_plus/articles/nr:1009893
+curl -H "Authorization: Bearer $TOKEN" -F kind=nutrition -F file=@label.jpg \
+     http://homeassistant.local:8123/api/lidl_plus/articles/nr:1009893/images
 ```
 
 | Endpoint (below `/api/lidl_plus`) | Content |
@@ -333,10 +344,23 @@ curl -H "Authorization: Bearer $TOKEN" -OJ "http://homeassistant.local:8123/api/
 | `/shopping_duration` | how long the shopping took: average, by weekday, the last visits with arrival and departure |
 | `/articles?q=skyr&kind=nutrition` | the article database with barcodes, package size, nutrition values, ingredients and notes; `kind=` `bought`, `offers`, `leaflets`, `own`, `details`, `nutrition`, `no_nutrition`, `ingredients`, `photos`, `barcode`, `sort=` |
 | `/articles/{key}`, `/images/{id}` | an article with all details (e.g. `nr:0082052`), a photo of an article |
+| `/barcodes/{code}?lookup=true` | the articles with a barcode, for unknown ones the product of Open Food Facts |
 | `/coupons`, `/stores`, `/accounts` | coupons, stores of the receipts and of the offers, configured accounts (`entry_id=` selects the account) |
 | `/export?dataset=items&format=csv` | download: `all` (ZIP), `receipts`, `items`, `products`, `offers`, `leaflets`, `articles` as CSV or JSON |
 
-A Home Assistant token allows everything its user may do in Home Assistant, not only reading this API. Give the assistant its own user without administrator rights and delete the token when it is not needed anymore.
+Changes of the article database (the answer is the article with all details, errors have a `code` like `barcode_in_use`):
+
+| Request (below `/api/lidl_plus`) | Change |
+|---|---|
+| `POST /articles` | add an article (JSON with `name` and any details) |
+| `PATCH /articles/{key}` | change details: `name`, `brand`, `package_size`, `barcodes`, `nutrition` (per 100 g/ml: `energy_kj`, `energy_kcal`, `fat`, `saturated_fat`, `carbohydrates`, `sugars`, `fiber`, `protein`, `salt`), `nutrition_basis` (`100g`/`100ml`), `ingredients`, `notes`, `image` |
+| `DELETE /articles/{key}` | remove the details added by hand, an article added by hand is removed completely |
+| `POST /articles/{key}/images?kind=nutrition` | add a photo (JPEG, PNG or WebP up to 2.5 MB) as body or as form field `file`; `kind`: `nutrition`, `ingredients`, `front`, `other` |
+| `DELETE /articles/{key}/images/{id}` | remove a photo |
+| `POST /articles/{key}/leaflets` | add the article to a page of a leaflet: `{"leaflet_id": "...", "page": 2}` |
+| `DELETE /articles/{key}/leaflets/{leaflet_id}?page=2` | remove it from a page, without `page` from the whole leaflet |
+
+A Home Assistant token allows everything its user may do in Home Assistant, not only this API. Give the assistant or app its own user without administrator rights and delete the token when it is not needed anymore. Web apps of other addresses may use the API if their address is in `cors_allowed_origins` of the [`http` configuration](https://www.home-assistant.io/integrations/http/).
 
 ### Updating from 1.1.0
 The update does not delete any data:
@@ -364,10 +388,10 @@ cd tests/frontend && npm ci && npm test # the sidebar panel (panel.js and index.
 
 ### 1.3.0 — Home Assistant integration (2026-09-24)
 - Article database in the tab *Artikel*: every article bought, offered or shown in a leaflet, with search and filters (bought, offers, leaflets, own articles, with nutrition values, photos, barcode, …); details added by hand: barcodes, package size, nutrition values per 100 g/ml, ingredients (also for non-food), notes and photos (made smaller before they are sent); articles added by hand
-- Barcode scanner: the scanner of the Home Assistant app, the camera in the browser or typing the barcode; unknown barcodes are looked up in Open Food Facts, Open Beauty Facts and Open Products Facts and can be added to an article or saved as a new one
-- The leaflets show the offers of the Lidl Plus app printed on their pages (Lidl provides product data only for the products of the online shop); products and offers open their article
+- Barcode scanner: the scanner of the Home Assistant app, the camera in the browser or typing the barcode; a known barcode opens its article, for an unknown one you search the article it belongs to or add a new one, with the values of Open Food Facts, Open Beauty Facts or Open Products Facts
+- The leaflets show the offers of the Lidl Plus app printed on their pages (Lidl provides product data only for the products of the online shop) and the articles of the article database on their pages: added to a page by hand ("＋ Artikel" below a page) or found by their name; products and offers open their article
 - Shopping duration from the location history of the persons, matched with the receipts: arrival, departure and time until paying for every receipt, statistics in the tab *Stoßzeiten*, sensor *Last shopping duration*, a button that creates a zone around the store; *Configure* chooses the persons
-- REST API: `/articles`, `/articles/{key}`, `/images/{id}`, `/shopping_duration`, receipts with their `visit`; export table `articles` (the ZIP file also contains the details added by hand)
+- REST API: `/articles`, `/articles/{key}`, `/barcodes/{code}`, `/images/{id}`, `/shopping_duration`, receipts with their `visit`; the article database can be changed (`POST`, `PATCH` and `DELETE` of articles, photos and leaflet pages), e.g. by an app with the token of a Home Assistant user; export table `articles` (the ZIP file also contains the details added by hand)
 
 ### 0.6.0 — Python library (2026-09-24)
 - New module `lidlplus.articles`: article catalog of the receipts, offers and leaflets, the offers printed on the pages of a leaflet, details added by hand, search, barcode check (EAN/UPC)

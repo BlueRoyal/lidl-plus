@@ -3,8 +3,8 @@ REST API for AI assistants and other programs
 
 Every endpoint needs a Home Assistant access token ("Authorization: Bearer <long-lived token>").
 Tools that read OpenAPI find the description of all endpoints at /api/lidl_plus/openapi.json.
-The API only reads: nothing can be changed or activated through it (the panel changes the articles through the
-websocket API).
+Everything can be read, but only the article database can be changed (articles, their details, photos, barcodes and
+the leaflets they are printed in): coupons cannot be activated and the receipts cannot be changed.
 """
 
 from __future__ import annotations
@@ -13,15 +13,32 @@ from collections import defaultdict
 from http import HTTPStatus
 from typing import Any
 
+import voluptuous as vol
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.http.data_validator import RequestDataValidator
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 
 from ._lidlplus import analytics, export
 from ._lidlplus.articles import FILTERS, SORTS, article_list_entry, find_articles
-from .article_api import article_details, async_articles
-from .article_store import article_store
+from .article_api import (
+    ARTICLE_FIELDS,
+    BARCODE_IN_USE,
+    INVALID_BARCODE,
+    INVALID_FORMAT,
+    LEAFLET_FIELDS,
+    NOT_FOUND,
+    article_details,
+    async_add_article_image,
+    async_articles,
+    async_barcode,
+    async_delete_article,
+    async_delete_article_image,
+    async_link_article_leaflet,
+    async_save_article,
+)
+from .article_store import ArticleError, article_store
 from .const import (
     DOMAIN,
     KEY_AVERAGE_BASKET,
@@ -63,6 +80,15 @@ _PRODUCT_SORTS = {
 _EXPORT_TYPES = {"csv": "text/csv", "json": "application/json", "zip": "application/zip"}
 # "active" are the current and upcoming ones
 _STATUSES = ("active", "current", "upcoming", "expired", "all")
+# HTTP status of the errors of changes of the article database
+_ERROR_STATUS = {
+    NOT_FOUND: HTTPStatus.NOT_FOUND,
+    INVALID_FORMAT: HTTPStatus.BAD_REQUEST,
+    INVALID_BARCODE: HTTPStatus.BAD_REQUEST,
+    BARCODE_IN_USE: HTTPStatus.CONFLICT,
+    "too_many": HTTPStatus.CONFLICT,
+    "too_large": HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+}
 
 
 def _flag(request: web.Request, name: str) -> bool:
@@ -114,6 +140,8 @@ class LidlPlusView(HomeAssistantView):
     """Base of the API views: selects the account of the query parameter entry_id"""
 
     requires_auth = True
+    # Web apps of the origins in "cors_allowed_origins" of the http configuration may use the API (with a token)
+    cors_allowed = True
 
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
@@ -125,6 +153,16 @@ class LidlPlusView(HomeAssistantView):
 
     def _not_found(self, message: str = "No loaded Lidl Plus account") -> web.Response:
         return self.json_message(message, HTTPStatus.NOT_FOUND)
+
+    async def _change(self, request: web.Request, change: Any, status: HTTPStatus = HTTPStatus.OK) -> web.Response:
+        """Answer with the article returned by a change of the article database, or with the error of the change"""
+        entry = self._entry(request)
+        try:
+            article = await change(entry)
+        except ArticleError as err:
+            return self.json_message(str(err), _ERROR_STATUS.get(err.code, HTTPStatus.BAD_REQUEST), err.code)
+        # The photos are loaded with the same access token
+        return self.json(article_details(self.hass, entry, article, sign=False) if article else None, status)
 
 
 class IndexView(LidlPlusView):
@@ -139,7 +177,18 @@ class IndexView(LidlPlusView):
             {
                 "name": "Lidl Plus",
                 "openapi": f"{API_PATH}/openapi.json",
-                "endpoints": {path: operation["get"]["summary"] for path, operation in spec["paths"].items()},
+                "endpoints": {
+                    path: operations["get"]["summary"]
+                    for path, operations in spec["paths"].items()
+                    if "get" in operations
+                },
+                # The changes of the article database
+                "changes": {
+                    f"{method.upper()} {path}": operation["summary"]
+                    for path, operations in spec["paths"].items()
+                    for method, operation in operations.items()
+                    if method != "get"
+                },
             }
         )
 
@@ -522,6 +571,13 @@ class ArticlesView(LidlPlusView):
         page = _page(request, find_articles(articles, request.query.get("q", ""), kind, sort), 50, 1000)
         return self.json({**page, "results": [article_list_entry(article) for article in page["results"]]})
 
+    @RequestDataValidator(vol.Schema(ARTICLE_FIELDS))
+    async def post(self, request: web.Request, data: dict[str, Any]) -> web.Response:
+        """Add an article, it needs a name"""
+        return await self._change(
+            request, lambda entry: async_save_article(self.hass, entry, None, data), HTTPStatus.CREATED
+        )
+
 
 class ArticleView(LidlPlusView):
     """A single article with all its details"""
@@ -535,6 +591,94 @@ class ArticleView(LidlPlusView):
             return self._not_found("Article not found")
         # The photos are loaded with the same access token
         return self.json(article_details(self.hass, entry, article, sign=False))
+
+    @RequestDataValidator(vol.Schema(ARTICLE_FIELDS))
+    async def patch(self, request: web.Request, data: dict[str, Any], key: str) -> web.Response:
+        """Change the details of an article: the given fields replace the old ones, empty ones remove them"""
+        return await self._change(request, lambda entry: async_save_article(self.hass, entry, key, data))
+
+    async def delete(self, request: web.Request, key: str) -> web.Response:
+        """Remove the details and photos of an article, an article added by hand is removed completely"""
+        return await self._change(request, lambda entry: async_delete_article(self.hass, entry, key))
+
+
+class ArticleImagesView(LidlPlusView):
+    """Add a photo to an article"""
+
+    url = f"{API_PATH}/articles/{{key}}/images"
+    name = "api:lidl_plus:article_images"
+
+    async def post(self, request: web.Request, key: str) -> web.Response:
+        # The photo as body, or as field "file" of a form (multipart/form-data)
+        kind = request.query.get("kind", "other")
+        if request.content_type.startswith("multipart/"):
+            form = await request.post()
+            kind = str(form.get("kind") or kind)
+            if not isinstance(upload := form.get("file"), web.FileField):
+                return self.json_message("The photo is missing, send it as field file", HTTPStatus.BAD_REQUEST)
+            content = await self.hass.async_add_executor_job(upload.file.read)
+        else:
+            content = await request.read()
+        if not content:
+            return self.json_message("The photo is missing", HTTPStatus.BAD_REQUEST)
+        return await self._change(
+            request,
+            lambda entry: async_add_article_image(self.hass, entry, key, kind, content),
+            HTTPStatus.CREATED,
+        )
+
+
+class ArticleImageDeleteView(LidlPlusView):
+    """Remove a photo of an article"""
+
+    url = f"{API_PATH}/articles/{{key}}/images/{{image_id}}"
+    name = "api:lidl_plus:article_image"
+
+    async def delete(self, request: web.Request, key: str, image_id: str) -> web.Response:
+        return await self._change(request, lambda entry: async_delete_article_image(self.hass, entry, key, image_id))
+
+
+class ArticleLeafletsView(LidlPlusView):
+    """Add an article to a page of a leaflet: it is printed there, but Lidl has no data about it"""
+
+    url = f"{API_PATH}/articles/{{key}}/leaflets"
+    name = "api:lidl_plus:article_leaflets"
+
+    @RequestDataValidator(vol.Schema(LEAFLET_FIELDS))
+    async def post(self, request: web.Request, data: dict[str, Any], key: str) -> web.Response:
+        return await self._change(request, lambda entry: async_link_article_leaflet(self.hass, entry, key, data))
+
+
+class ArticleLeafletView(LidlPlusView):
+    """Remove an article from a page of a leaflet (query parameter page) or from all its pages"""
+
+    url = f"{API_PATH}/articles/{{key}}/leaflets/{{leaflet_id}}"
+    name = "api:lidl_plus:article_leaflet"
+
+    async def delete(self, request: web.Request, key: str, leaflet_id: str) -> web.Response:
+        fields: dict[str, Any] = {"leaflet_id": leaflet_id}
+        if "page" in request.query:
+            try:
+                fields["page"] = int(request.query["page"])
+            except ValueError:
+                return self.json_message("page must be a number", HTTPStatus.BAD_REQUEST)
+        return await self._change(
+            request, lambda entry: async_link_article_leaflet(self.hass, entry, key, fields, remove=True)
+        )
+
+
+class BarcodeView(LidlPlusView):
+    """The articles with a barcode and, for an unknown one, the product of Open Food Facts"""
+
+    url = f"{API_PATH}/barcodes/{{code}}"
+    name = "api:lidl_plus:barcode"
+
+    async def get(self, request: web.Request, code: str) -> web.Response:
+        try:
+            result = await async_barcode(self.hass, self._entry(request), code, _flag(request, "lookup"))
+        except ArticleError as err:
+            return self.json_message(str(err), HTTPStatus.BAD_REQUEST, err.code)
+        return self.json(result)
 
 
 class ImageView(LidlPlusView):
@@ -601,6 +745,11 @@ def async_setup_rest_api(hass: HomeAssistant) -> None:
         ShoppingDurationView,
         ArticlesView,
         ArticleView,
+        ArticleImagesView,
+        ArticleImageDeleteView,
+        ArticleLeafletsView,
+        ArticleLeafletView,
+        BarcodeView,
         ImageView,
         ExportView,
     ):

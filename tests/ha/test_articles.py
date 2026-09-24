@@ -7,11 +7,14 @@ import io
 import json
 import os
 import zipfile
+from datetime import timedelta
 from http import HTTPStatus
 from typing import Any
 
+import aiohttp
 import pytest
 from freezegun.api import FrozenDateTimeFactory
+from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
@@ -340,8 +343,8 @@ async def test_rest_api_and_export(
     assert (await client.get(article["images"][0]["url"])).status == 200
     assert (await client.get("/api/lidl_plus/articles/nr:unknown")).status == 404
     spec = await (await client.get("/api/lidl_plus/openapi.json")).json()
-    assert {"listArticles", "getArticle", "getImage", "getShoppingDuration"} <= {
-        operation["get"]["operationId"] for operation in spec["paths"].values()
+    assert {"listArticles", "getArticle", "getImage", "getShoppingDuration", "findBarcode"} <= {
+        operation["operationId"] for methods in spec["paths"].values() for operation in methods.values()
     }
 
     # The export contains the article database with the details added by hand
@@ -359,3 +362,130 @@ async def test_rest_api_and_export(
     )
     with open(response["files"][0], encoding="utf-8-sig") as file:
         assert file.readline().startswith("key;name;brand")
+
+
+async def test_articles_on_leaflet_pages(ws, hass_storage: dict[str, Any], hass_client: ClientSessionGenerator) -> None:
+    # Printed on page 2, but Lidl has no data about it
+    link = {"type": "lidl_plus/article_leaflet", "key": "nr:a", "leaflet_id": "l1"}
+    article = await ws({**link, "page": 2})
+    assert [(entry["id"], entry["pages"], entry["added_pages"]) for entry in article["leaflets"]] == [("l1", [2], [2])]
+    assert "leaflets" in article["sources"]
+    stored = hass_storage[STORAGE_KEY]["data"]["articles"]["nr:a"]["leaflets"]
+    assert [(entry["id"], entry["name"], entry["pages"]) for entry in stored] == [("l1", "Aktionsprospekt", [2])]
+    # Articles named by hand are found on the pages by their name
+    own = await ws({"type": "lidl_plus/article_save", "name": "Kaffee ganze Bohnen"})
+    leaflet = await ws({"type": "lidl_plus/leaflet", "leaflet_id": "l1"})
+    assert [(entry["key"], entry["pages"], entry["added"]) for entry in leaflet["articles"]] == [
+        (own["key"], [1], False),
+        ("nr:a", [2], True),
+    ]
+    rest = await (await (await hass_client()).get("/api/lidl_plus/leaflets/l1")).json()
+    assert len(rest["articles"]) == 2
+
+    # Removed from a page, and from all pages of a leaflet
+    await ws({**link, "page": 1})
+    article = await ws({**link, "page": 2, "remove": True})
+    assert [(entry["id"], entry["pages"]) for entry in article["leaflets"]] == [("l1", [1])]
+    article = await ws({**link, "remove": True})
+    assert article["leaflets"] == []
+    assert [entry["key"] for entry in (await ws({"type": "lidl_plus/leaflet", "leaflet_id": "l1"}))["articles"]] == [
+        own["key"]
+    ]
+
+    # Errors
+    assert (await ws({**link, "leaflet_id": "unknown", "page": 1}, error=True))["code"] == "not_found"
+    assert (await ws({**link, "key": "nr:unknown", "page": 1}, error=True))["code"] == "not_found"
+    assert (await ws({**link, "page": 9}, error=True))["message"] == "Der Prospekt hat keine Seite 9"
+    assert (await ws(link, error=True))["message"] == "Die Seite des Prospekts fehlt"
+    # Leaflets without pages in the cache accept every page
+    assert [entry["id"] for entry in (await ws({**link, "leaflet_id": "l0", "page": 3}))["leaflets"]] == ["l0"]
+
+
+async def test_changes_through_the_rest_api(
+    hass: HomeAssistant,
+    hass_client_no_auth: ClientSessionGenerator,
+    api_state: FakeApiState,
+    config_entry: MockConfigEntry,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """An app with the long-lived token of a user without administrator rights changes the article database"""
+    await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    # The first user becomes the owner
+    await hass.auth.async_create_user("Besitzer")
+    user = await hass.auth.async_create_user("App", group_ids=["system-users"])
+    assert not user.is_admin
+    refresh_token = await hass.auth.async_create_refresh_token(
+        user,
+        client_name="App",
+        token_type=TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
+        access_token_expiration=timedelta(days=3650),
+    )
+    token = {"Authorization": f"Bearer {hass.auth.async_create_access_token(refresh_token)}"}
+    client = await hass_client_no_auth()
+
+    async def call(method: str, path: str, status: int = 200, headers: dict[str, str] | None = None, **kwargs: Any):
+        response = await client.request(method, f"/api/lidl_plus{path}", headers={**token, **(headers or {})}, **kwargs)
+        assert response.status == status, await response.text()
+        return await response.json()
+
+    # A new article, its barcode finds it
+    new = {"name": "Handseife", "barcodes": ["96385074"], "ingredients": "Aqua"}
+    created = await call("post", "/articles", 201, json=new)
+    key = created["key"]
+    assert key.startswith("own:") and created["sources"] == ["own"] and created["ingredients"] == "Aqua"
+    found = await call("get", "/barcodes/96385074")
+    assert ([article["key"] for article in found["articles"]], found["product"]) == ([key], None)
+    # Details of an article of Lidl
+    details = {"package_size": "1 l", "nutrition": {"protein": 3.4}, "nutrition_basis": "100ml"}
+    changed = await call("patch", "/articles/nr:a", json=details)
+    assert (changed["package_size"], changed["nutrition"], changed["product"]["name"]) == (
+        "1 l",
+        {"protein": 3.4},
+        "Milch",
+    )
+    # Errors with their status and code
+    assert (await call("post", "/articles", 400, json={"brand": "Cien"}))["code"] == "invalid_format"
+    assert (await call("patch", "/articles/nr:a", 409, json={"barcodes": ["96385074"]}))["code"] == "barcode_in_use"
+    assert (await call("patch", "/articles/nr:a", 400, json={"barcodes": ["123"]}))["code"] == "invalid_barcode"
+    await call("patch", "/articles/nr:a", 400, json={"price": 1})
+    await call("patch", "/articles/nr:a", 400, data="no json")
+    assert (await call("patch", "/articles/nr:unknown", 404, json={"notes": "x"}))["code"] == "not_found"
+
+    # Photos as body or as field of a form
+    jpeg = {"Content-Type": "image/jpeg"}
+    article = await call("post", "/articles/nr:a/images?kind=nutrition", 201, data=JPEG, headers=jpeg)
+    assert [image["kind"] for image in article["images"]] == ["nutrition"]
+    form = aiohttp.FormData()
+    form.add_field("kind", "front")
+    form.add_field("file", PNG, filename="front.png", content_type="image/png")
+    article = await call("post", "/articles/nr:a/images", 201, data=form)
+    photo, front = article["images"]
+    assert (front["kind"], front["type"]) == ("front", "image/png")
+    assert (await client.get(photo["url"], headers=token)).status == 200
+    await call("post", "/articles/nr:a/images", 400, data=b"")
+    assert (await call("post", "/articles/nr:a/images?kind=selfie", 400, data=JPEG))["code"] == "invalid_format"
+    large = JPEG + bytes(MAX_IMAGE_BYTES)
+    assert (await call("post", "/articles/nr:a/images", 413, data=large))["code"] == "too_large"
+    article = await call("delete", f"/articles/nr:a/images/{photo['id']}")
+    assert [image["id"] for image in article["images"]] == [front["id"]]
+    await call("delete", f"/articles/nr:a/images/{photo['id']}", 404)
+
+    # Pages of leaflets
+    article = await call("post", "/articles/nr:a/leaflets", json={"leaflet_id": "l1", "page": 2})
+    assert [(entry["id"], entry["added_pages"]) for entry in article["leaflets"]] == [("l1", [2])]
+    assert [entry["key"] for entry in (await call("get", "/leaflets/l1"))["articles"]] == ["nr:a"]
+    await call("post", "/articles/nr:a/leaflets", 400, json={"leaflet_id": "l1", "page": 9})
+    await call("delete", "/articles/nr:a/leaflets/l1?page=zwei", 400)
+    assert (await call("delete", "/articles/nr:a/leaflets/l1?page=2"))["leaflets"] == []
+
+    # Removing: an article added by hand is gone, an article of Lidl keeps what Lidl knows
+    assert await call("delete", f"/articles/{key}") is None
+    await call("get", f"/articles/{key}", 404)
+    article = await call("delete", "/articles/nr:a")
+    assert (article["name"], article["package_size"], article["images"]) == ("Milch", "", [])
+
+    # Unknown barcodes are looked up in Open Food Facts
+    aioclient_mock.get(f"{OFF}/{CODE}.json", json={"status": 1, "product": SKYR})
+    assert (await call("get", f"/barcodes/{CODE}"))["product"]["name"] == "Skyr Natur"
+    assert (await call("get", "/barcodes/123", 400))["code"] == "invalid_barcode"

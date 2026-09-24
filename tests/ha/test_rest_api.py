@@ -44,9 +44,15 @@ async def test_description(get) -> None:
     assert index["endpoints"]["/api/lidl_plus/search"] == "Search everything"
     spec = await get("/openapi.json")
     assert spec["openapi"] == "3.1.0"
-    operations = {operation["get"]["operationId"] for operation in spec["paths"].values()}
-    assert {"listReceipts", "getLeaflet", "search", "exportData"} <= operations
-    assert set(index["endpoints"]) == set(spec["paths"])
+    operations = {operation["operationId"] for methods in spec["paths"].values() for operation in methods.values()}
+    assert {"listReceipts", "getLeaflet", "search", "exportData", "addArticle", "changeArticle"} <= operations
+    assert set(index["endpoints"]) == {path for path, methods in spec["paths"].items() if "get" in methods}
+    # The changes of the article database
+    assert index["changes"]["POST /api/lidl_plus/articles"] == "Add an article"
+    assert index["changes"]["DELETE /api/lidl_plus/articles/{key}/images/{image_id}"] == "Remove a photo of an article"
+    body = spec["paths"]["/api/lidl_plus/articles"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    assert body["required"] == ["name"]
+    assert body["properties"]["nutrition"]["properties"]["salt"]["type"] == ["number", "null"]
     assert spec["paths"]["/api/lidl_plus/leaflets"]["get"]["parameters"][1]["schema"]["enum"] == [
         "active",
         "current",

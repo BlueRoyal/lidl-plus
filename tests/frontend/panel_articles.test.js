@@ -163,7 +163,12 @@ const product = {
   assert.deepStrictEqual([search.query, search.kind, search.offset], ["duschgel", "nutrition", 0]);
   assert.match(search.bought_since, /^\d{4}-\d{2}-\d{2}$/);
   await answer({ total: 0, statistics: { articles: 927 }, articles: [] });
-  assert.strictEqual(grid.textContent, "Keine Artikel gefunden.");
+  // Not found: a new article named like the search
+  assert.ok(plain(grid).startsWith("Kein Artikel gefunden für „duschgel“."), plain(grid));
+  grid.querySelector("[data-create-article]").click();
+  assert.ok(document.getElementById("productModal").classList.contains("open"));
+  assert.strictEqual(document.getElementById("articleForm").elements.name.value, "duschgel");
+  window.closeProductModal();
   document.getElementById("productSearch").value = "";
   document.getElementById("productKind").value = "";
   document.getElementById("productPeriod").value = "";
@@ -326,6 +331,8 @@ const product = {
   for (const expected of ["gehört noch zu keinem Artikel", "Skyr Natur", "500 g · 63 kcal pro 100 g · Nutri-Score A", "Gefunden bei Open Food Facts"]) {
     assert.ok(scanResult.includes(expected), `${expected} missing in: ${scanResult}`);
   }
+  // First the search for the article, then a new one
+  assert.ok(scanResult.indexOf("Zu welchem Artikel gehört er?") < scanResult.indexOf("Nicht dabei?"), scanResult);
   assert.strictEqual(json(last().request), json({ type: "lidl_plus/articles", query: "Skyr", limit: 15, entry_id: "e1" }));
   await answer({ total: 1, articles: [listEntry("nr:0001", { name: "Milbona Skyr", receipt_names: ["Skyr"], purchase_count: 2 })] });
   document.querySelector("[data-link-key='nr:0001']").click();
@@ -437,6 +444,73 @@ const product = {
   await answer({ ...data.leaflets[0], pages: [], products: [], offers: [] });
   assert.ok(plain(leaflet).includes("liefert Lidl keine Produktdaten"));
   window.closeLeafletModal();
+
+  // ── Articles of the database on the pages of a leaflet ──────────────────────
+  const withPages = { ...data.leaflets[0], pages: [{ number: 1, image: "https://example.invalid/p1.jpg", text: "" },
+    { number: 2, image: "https://example.invalid/p2.jpg", text: "Skyr" }], products: [], offers: [], articles: [] };
+  document.querySelector("button[data-leaflet-id='l1']").click();
+  await answer(withPages);
+  assert.strictEqual(leaflet.querySelectorAll("[data-assign-page]").length, 2);
+  leaflet.querySelector("[data-assign-page='2']").click();
+  const pick = document.getElementById("pickModal");
+  assert.ok(pick.classList.contains("open"));
+  assert.strictEqual(document.getElementById("pickTitle").textContent, "Artikel auf Seite 2");
+  document.getElementById("pickSearch").value = " skyr ";
+  document.getElementById("pickForm").dispatchEvent(new window.Event("submit", { cancelable: true }));
+  assert.strictEqual(json(last().request), json({ type: "lidl_plus/articles", query: "skyr", limit: 15, entry_id: "e1" }));
+  await answer({ total: 1, articles: [listEntry("nr:0001", { name: "Milbona Skyr", purchase_count: 2 })] });
+  document.querySelector("#pickResults [data-link-key='nr:0001']").click();
+  assert.strictEqual(json(last().request), json({ type: "lidl_plus/article_leaflet", key: "nr:0001", leaflet_id: "l1", page: 2, entry_id: "e1" }));
+  await answer(article("nr:0001", { name: "Milbona Skyr" }));
+  assert.ok(!pick.classList.contains("open"));
+  // The leaflet is loaded again with the article
+  assert.strictEqual(json(last().request), json({ type: "lidl_plus/leaflet", leaflet_id: "l1", entry_id: "e1" }));
+  await answer({ ...withPages, articles: [{ ...listEntry("nr:0001", { name: "Milbona Skyr <b>" }), pages: [2], added: true },
+    { ...listEntry("own:7", { name: "Kaffee Crema" }), pages: [1], added: false }] });
+  const onPages = plain(leaflet);
+  for (const expected of ["✓ Milbona Skyr auf Seite 2 ergänzt", "Aus deiner Artikeldatenbank (2)", "Milbona Skyr <b>", "von dir ergänzt", "am Namen erkannt"]) {
+    assert.ok(onPages.includes(expected), `${expected} missing in: ${onPages}`);
+  }
+  assert.strictEqual(leaflet.querySelectorAll("b").length, 0);
+  // Not in the database yet: a new article named like the search, added to the page when it is saved
+  leaflet.querySelector("[data-assign-page='1']").click();
+  document.getElementById("pickSearch").value = "Handcreme";
+  document.querySelector("#pickModal button[onclick='createFromPick()']").click();
+  assert.ok(!pick.classList.contains("open") && modal.classList.contains("open"));
+  const pickForm = document.getElementById("articleForm");
+  assert.strictEqual(pickForm.elements.name.value, "Handcreme");
+  assert.ok(document.getElementById("articleFormStatus").textContent.includes("auf Seite 1 des Prospekts ergänzt"));
+  pickForm.dispatchEvent(new window.Event("submit", { cancelable: true }));
+  assert.strictEqual(last().request.type, "lidl_plus/article_save");
+  await answer(article("own:8", { name: "Handcreme", sources: ["own"] }));
+  assert.strictEqual(json(last().request), json({ type: "lidl_plus/article_leaflet", key: "own:8", leaflet_id: "l1", page: 1, entry_id: "e1" }));
+  await answer(article("own:8", { name: "Handcreme", sources: ["own", "leaflets"],
+    leaflets: [{ id: "l1", name: "Aktionsprospekt", title: "11.05. – 16.05.", pages: [1], added_pages: [1] }] }));
+  assert.strictEqual(document.getElementById("articleFormStatus").textContent, "✓ Gespeichert und auf Seite 1 ergänzt");
+  // The leaflet below is loaded again, and the list of the article tab
+  const reload = [...parentMessages].reverse().find((entry) => entry.msg.request && entry.msg.request.type === "lidl_plus/leaflet").msg;
+  assert.strictEqual(last().request.type, "lidl_plus/articles");
+  send({ type: "lidl-plus:result", id: reload.id, result: withPages });
+  await tick();
+  // Added by hand: the article dialog removes it from the leaflet with a second click
+  const unlink = document.querySelector("[data-unlink-leaflet='l1']");
+  assert.ok(plain(document.getElementById("articleHead")).includes("von dir ergänzt"));
+  unlink.click();
+  assert.strictEqual(unlink.textContent, "Entfernen?");
+  unlink.click();
+  assert.strictEqual(json(last().request), json({ type: "lidl_plus/article_leaflet", key: "own:8", leaflet_id: "l1", remove: true, entry_id: "e1" }));
+  await answer(article("own:8", { name: "Handcreme", sources: ["own"] }));
+  assert.strictEqual(document.getElementById("articleFormStatus").textContent, "✓ Aus dem Prospekt entfernt");
+  window.closeProductModal();
+  await answer(withPages);
+  window.closeLeafletModal();
+  // Pages of search results have no buttons to add articles
+  document.getElementById("globalSearch").value = "skyr";
+  window.searchAll();
+  await answer({ products: [], offers: [], leaflets: [{ leaflet: { id: "l1", name: "Aktionsprospekt", title: "", status: "current" },
+    pages: withPages.pages, products: [] }] });
+  assert.strictEqual(document.getElementById("searchResults").querySelectorAll("[data-assign-page]").length, 0);
+  window.clearSearch();
 
   // ── Shopping duration and the zone of the store ─────────────────────────────
   const busyTab = [...document.querySelectorAll(".tab-btn")].find((button) => button.textContent.includes("Stoßzeiten"));

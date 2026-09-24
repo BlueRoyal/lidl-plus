@@ -132,15 +132,43 @@ class ArticleStore:
                 data["nutrition_basis"] = changes["nutrition_basis"]
             if "sources" in changes:
                 data["sources"] = {**(data.get("sources") or {}), **changes["sources"]}
-            # Empty fields are not stored
-            data = {field: value for field, value in data.items() if value not in ("", [], {}, None)}
-            now = dt_util.utcnow().isoformat()
-            data.setdefault("created", now)
-            data["updated"] = now
-            articles[key] = data
-            self._articles = articles
-            await self._async_save()
-            return data
+            return await self._async_store(key, data)
+
+    async def _async_store(self, key: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Save the details of an article (with the lock), without empty fields"""
+        data = {field: value for field, value in data.items() if value not in ("", [], {}, None)}
+        now = dt_util.utcnow().isoformat()
+        data.setdefault("created", now)
+        data["updated"] = now
+        articles = self._articles if self._articles is not None else {}
+        articles[key] = data
+        self._articles = articles
+        await self._async_save()
+        return data
+
+    async def async_link_leaflet(
+        self, key: str, leaflet: dict[str, Any], page: int | None, remove: bool = False
+    ) -> dict[str, Any]:
+        """
+        Add an article to a page of a leaflet (it is printed there, but Lidl does not know it), or remove it from a
+        page again; without page from all pages of the leaflet
+        """
+        await self.async_load()
+        async with self._lock:
+            data = dict((self._articles or {}).get(key) or {})
+            links = [dict(link) for link in data.get("leaflets") or []]
+            link = next((entry for entry in links if entry["id"] == leaflet["id"]), None)
+            if link is None and not remove:
+                link = {field: leaflet.get(field) or "" for field in ("id", "name", "title", "start", "end")}
+                link["pages"] = []
+                links.insert(0, link)
+            if link is not None:
+                if not remove:
+                    link["pages"] = sorted({*link["pages"], page})
+                else:
+                    link["pages"] = [number for number in link["pages"] if page is not None and number != page]
+            data["leaflets"] = [entry for entry in links if entry["pages"]]
+            return await self._async_store(key, data)
 
     async def async_delete(self, key: str) -> None:
         """Remove the details and photos of an article, an article added by hand is removed completely"""

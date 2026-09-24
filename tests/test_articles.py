@@ -229,6 +229,55 @@ def test_merge_user_data():
     assert renamed["nr:0003"]["has_details"] and not renamed["nr:0002"]["has_details"]
 
 
+def test_leaflets_added_by_hand():
+    user_data = {
+        # Also on page 2 of the leaflet the drill is known from
+        "web:100001": {"leaflets": [{"id": "l1", "name": "Aktionsprospekt", "title": "t", "pages": [2, 1]}]},
+        # A leaflet without products, the article is known from there only
+        "own:1": {
+            "name": "Duschgel",
+            "leaflets": [
+                {
+                    "id": "l9",
+                    "name": "dauerhaft günstiger!",
+                    "title": "",
+                    "start": "2026-01-01",
+                    "end": "2099-12-31",
+                    "pages": [7],
+                }
+            ],
+        },
+    }
+    merged = articles.merge_user_data(articles.article_catalog(TICKETS, OFFERS, LEAFLETS), user_data)
+    drill = merged["web:100001"]
+    assert [(entry["id"], entry["pages"], entry.get("added_pages")) for entry in drill["leaflets"]] == [
+        ("l2", [1], None),
+        ("l1", [1, 2], [1, 2]),
+    ]
+    assert drill["has_details"]
+    own = merged["own:1"]
+    assert own["sources"] == ["own", "leaflets"]
+    assert [(entry["id"], entry["pages"], entry["added_pages"], entry["status"]) for entry in own["leaflets"]] == [
+        ("l9", [7], [7], "current")
+    ]
+    assert [article["key"] for article in articles.find_articles(merged, kind="leaflets", sort="name-asc")][
+        0
+    ] == "web:100001"
+    # The catalog stays as it is
+    assert "added_pages" not in articles.article_catalog(TICKETS, OFFERS, LEAFLETS)["web:100001"]["leaflets"][1]
+
+
+def test_articles_of_leaflet():
+    merged = articles.merge_user_data(
+        articles.article_catalog(TICKETS, OFFERS, LEAFLETS),
+        {"own:1": {"name": "Bellarom Kaffee Crema"}, "own:2": {"name": "Handseife"}},
+    )
+    own = [article for article in merged.values() if "own" in article["sources"]]
+    found = articles.articles_of_leaflet(LEAFLETS[0], own)
+    assert [(article["key"], article["pages"]) for article in found] == [("own:1", [2])]
+    assert articles.articles_of_leaflet({"pages": []}, own) == []
+
+
 def test_find_articles():
     merged = articles.merge_user_data(articles.article_catalog(TICKETS, OFFERS, LEAFLETS), USER_DATA)
 
