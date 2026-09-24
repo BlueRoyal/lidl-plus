@@ -11,6 +11,8 @@ CONF_OFFER_STORES = "offer_stores"
 CONF_BESTTIME_API_KEY = "besttime_api_key"
 # A forecast of BestTime.app is created again after this number of days (BestTime recommends 2 to 4 weeks)
 BESTTIME_REFRESH_DAYS = 21
+# Option: persons whose locations show the shopping duration, without it all persons
+CONF_VISIT_ENTITIES = "visit_entities"
 
 DEFAULT_SCAN_INTERVAL_HOURS = 6
 FREQUENTLY_BOUGHT_LIMIT = 10
@@ -57,6 +59,10 @@ KEY_LEAFLET_REGION = "leaflet_region"
 KEY_BUSY_TIMES = "busy_times"
 # Changes with every update of the data, also when only offers or leaflets changed
 KEY_DATA_VERSION = "data_version"
+# Every article known from the receipts, offers and leaflets by article key (see _lidlplus.articles)
+KEY_CATALOG = "catalog"
+# How long the shopping took: statistics of the visits of the stores (the receipts have their visit)
+KEY_SHOPPING_DURATION = "shopping_duration"
 
 # Services
 SERVICE_ACTIVATE_ALL_COUPONS = "activate_all_coupons"

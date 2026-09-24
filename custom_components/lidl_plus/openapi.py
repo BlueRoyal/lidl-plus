@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ._lidlplus.articles import FILTERS, SORTS
+
 API_PATH = "/api/lidl_plus"
 
 
@@ -181,6 +183,53 @@ _OPERATIONS: dict[str, tuple[str, str, str, list[dict[str, Any]]]] = {
         "with `busyness_now` for the current hour. The best start for questions like 'when is the store quiet?'.",
         [_ENTRY],
     ),
+    "/shopping_duration": (
+        "getShoppingDuration",
+        "Shopping duration",
+        "How long the shopping took, measured with the location history of the persons (Home Assistant companion "
+        "app) at the store: average, shortest and longest duration in minutes, the average per weekday "
+        "(`by_weekday`, 0 = Monday), `average_checkout_minutes` (arrival until paying) and the last visit with "
+        "arrival and departure. `recent_visits` lists the latest receipts with their visit; a receipt of /receipts "
+        "has its `visit` as well (status ok, incomplete, not_seen or no_location).",
+        [_ENTRY],
+    ),
+    "/articles": (
+        "listArticles",
+        "Article database",
+        "Every article known: bought (receipts, with the Lidl article number), offered in the Lidl Plus app, shown "
+        "in a leaflet (products of the online shop) or added by hand, with the details added in the panel: "
+        "barcodes (EAN), package size, nutrition values, ingredients (also of non-food articles), notes and the "
+        "number of photos. Keys are nr:<article number>, offer:<name>, web:<product number> or own:<id>. "
+        f"{_PAGED}",
+        [
+            _ENTRY,
+            _query("q", "Words that must all appear in name, brand, receipt names, barcode, ingredients or notes"),
+            _query(
+                "kind",
+                "Only articles that were bought, offered, in leaflets, added by hand, with details, with nutrition "
+                "values, without nutrition values, with ingredients, with photos or with a barcode",
+                {"type": "string", "enum": list(FILTERS)},
+            ),
+            _query("sort", "Order of the articles", {"type": "string", "enum": list(SORTS), "default": "count-desc"}),
+            _LIMIT,
+            _OFFSET,
+        ],
+    ),
+    "/articles/{key}": (
+        "getArticle",
+        "Single article",
+        "An article with all details: purchase statistics and price history (`product`, if bought), the offers and "
+        "leaflets it was part of, package size, nutrition values per 100 g or 100 ml (`nutrition`, "
+        "`nutrition_basis`, energy in kJ and kcal, fat, saturated fat, carbohydrates, sugars, fiber, protein and "
+        "salt in grams), ingredients, notes and photos (`images[].url`, loaded with the same access token).",
+        [_path("key", "Key of the article from /articles, e.g. nr:0082446"), _ENTRY],
+    ),
+    "/images/{image_id}": (
+        "getImage",
+        "Photo of an article",
+        "A photo of an article (JPEG, PNG or WebP), e.g. of the nutrition label or the list of ingredients.",
+        [_path("image_id", "Id of the photo from images[] of an article")],
+    ),
     "/export": (
         "exportData",
         "Export",
@@ -193,7 +242,7 @@ _OPERATIONS: dict[str, tuple[str, str, str, list[dict[str, Any]]]] = {
                 "Table to export",
                 {
                     "type": "string",
-                    "enum": ["all", "receipts", "items", "products", "offers", "leaflets"],
+                    "enum": ["all", "receipts", "items", "products", "offers", "leaflets", "articles"],
                     "default": "all",
                 },
             ),
@@ -204,13 +253,14 @@ _OPERATIONS: dict[str, tuple[str, str, str, list[dict[str, Any]]]] = {
 
 
 def _operation(operation_id: str, summary: str, description: str, parameters: list[dict[str, Any]]) -> dict:
-    content = (
-        {"application/zip": {}, "text/csv": {}, "application/json": {}}
-        if operation_id == "exportData"
-        else {"application/json": {"schema": {"type": ["object", "array"]}}}
-    )
+    if operation_id == "exportData":
+        content: dict[str, Any] = {"application/zip": {}, "text/csv": {}, "application/json": {}}
+    elif operation_id == "getImage":
+        content = {"image/jpeg": {}, "image/png": {}, "image/webp": {}}
+    else:
+        content = {"application/json": {"schema": {"type": ["object", "array"]}}}
     responses: dict[str, Any] = {"200": {"description": summary, "content": content}}
-    if operation_id in ("listOffers", "listLeaflets", "search", "exportData"):
+    if operation_id in ("listOffers", "listLeaflets", "search", "exportData", "listArticles"):
         responses["400"] = {"description": "Invalid or missing parameter"}
     if operation_id != "listAccounts":
         responses["404"] = {"description": "No loaded Lidl Plus account, or the requested entry was not found"}

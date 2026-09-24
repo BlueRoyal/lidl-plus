@@ -3,7 +3,8 @@ REST API for AI assistants and other programs
 
 Every endpoint needs a Home Assistant access token ("Authorization: Bearer <long-lived token>").
 Tools that read OpenAPI find the description of all endpoints at /api/lidl_plus/openapi.json.
-The API only reads: nothing can be changed or activated through it.
+The API only reads: nothing can be changed or activated through it (the panel changes the articles through the
+websocket API).
 """
 
 from __future__ import annotations
@@ -18,6 +19,9 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 
 from ._lidlplus import analytics, export
+from ._lidlplus.articles import FILTERS, SORTS, article_list_entry, find_articles
+from .article_api import article_details, async_articles
+from .article_store import article_store
 from .const import (
     DOMAIN,
     KEY_AVERAGE_BASKET,
@@ -39,6 +43,7 @@ from .const import (
     KEY_RESTOCK_SUGGESTIONS,
     KEY_SAVINGS_MONTH,
     KEY_SAVINGS_TOTAL,
+    KEY_SHOPPING_DURATION,
     KEY_SHOPPING_FREQUENCY,
     KEY_SPENDING_BY_STORE,
     KEY_STORES,
@@ -475,6 +480,78 @@ class BusyTimesView(LidlPlusView):
         )
 
 
+class ShoppingDurationView(LidlPlusView):
+    """How long the shopping took, from the locations of the persons at the store"""
+
+    url = f"{API_PATH}/shopping_duration"
+    name = "api:lidl_plus:shopping_duration"
+
+    async def get(self, request: web.Request) -> web.Response:
+        if (entry := self._entry(request)) is None:
+            return self._not_found()
+        data = entry.runtime_data.data
+        visits = [
+            {
+                "receipt_id": receipt["id"],
+                "date": receipt["date"],
+                "store": receipt["store"],
+                **{
+                    key: receipt["visit"].get(key)
+                    for key in ("status", "arrived", "left", "minutes", "checkout_minutes")
+                },
+            }
+            for receipt in data[KEY_RECEIPTS]
+            if receipt.get("visit")
+        ]
+        return self.json({**(data.get(KEY_SHOPPING_DURATION) or {}), "recent_visits": visits[:50]})
+
+
+class ArticlesView(LidlPlusView):
+    """Article database: articles bought, offered, shown in leaflets or added by hand, with their details"""
+
+    url = f"{API_PATH}/articles"
+    name = "api:lidl_plus:articles"
+
+    async def get(self, request: web.Request) -> web.Response:
+        kind, sort = request.query.get("kind", ""), request.query.get("sort", "count-desc")
+        if kind not in ("", *FILTERS) or sort not in SORTS:
+            return self.json_message(
+                f"kind must be one of {', '.join(FILTERS)}, sort one of {', '.join(SORTS)}", HTTPStatus.BAD_REQUEST
+            )
+        articles = await async_articles(self.hass, self._entry(request))
+        page = _page(request, find_articles(articles, request.query.get("q", ""), kind, sort), 50, 1000)
+        return self.json({**page, "results": [article_list_entry(article) for article in page["results"]]})
+
+
+class ArticleView(LidlPlusView):
+    """A single article with all its details"""
+
+    url = f"{API_PATH}/articles/{{key}}"
+    name = "api:lidl_plus:article"
+
+    async def get(self, request: web.Request, key: str) -> web.Response:
+        entry = self._entry(request)
+        if (article := (await async_articles(self.hass, entry)).get(key)) is None:
+            return self._not_found("Article not found")
+        # The photos are loaded with the same access token
+        return self.json(article_details(self.hass, entry, article, sign=False))
+
+
+class ImageView(LidlPlusView):
+    """A photo of an article, also shown in the panel with a signed address"""
+
+    url = f"{API_PATH}/images/{{image_id}}"
+    name = "api:lidl_plus:image"
+
+    async def get(self, request: web.Request, image_id: str) -> web.StreamResponse:
+        store = article_store(self.hass)
+        await store.async_load()
+        found = store.image(image_id)
+        if found is None or not await self.hass.async_add_executor_job(found[0].is_file):
+            return self._not_found("Photo not found")
+        return web.FileResponse(found[0], headers={"Content-Type": found[1], "Cache-Control": "private, max-age=86400"})
+
+
 class ExportView(LidlPlusView):
     """Download of receipts, articles, products, offers or leaflets as CSV/JSON, or everything as ZIP"""
 
@@ -521,6 +598,10 @@ def async_setup_rest_api(hass: HomeAssistant) -> None:
         CouponsView,
         StoresView,
         BusyTimesView,
+        ShoppingDurationView,
+        ArticlesView,
+        ArticleView,
+        ImageView,
         ExportView,
     ):
         hass.http.register_view(view(hass))

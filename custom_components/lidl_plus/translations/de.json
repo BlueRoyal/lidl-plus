@@ -43,16 +43,18 @@
   "options": {
     "step": {
       "init": {
-        "title": "Filialen",
+        "title": "Filialen und Optionen",
         "description": "Wähle die Filialen, deren aktuelle und kommende Angebote geladen werden. Die erste Filiale bestimmt außerdem die Region der Prospekte und die Filiale der Stoßzeiten. Ohne Auswahl wird die Filiale genommen, in der du am häufigsten einkaufst.",
         "data": {
           "offer_stores": "Filialen",
           "search": "Weitere Filialen suchen",
-          "besttime_api_key": "Privater API-Schlüssel von BestTime.app (optional)"
+          "besttime_api_key": "Privater API-Schlüssel von BestTime.app (optional)",
+          "visit_entities": "Personen für die Einkaufsdauer"
         },
         "data_description": {
           "search": "Ort, Postleitzahl oder Straße. Die gefundenen Filialen erscheinen in der Liste, dort auswählen und speichern.",
-          "besttime_api_key": "Für die Stoßzeiten der Filiale: Konto auf besttime.app anlegen und den privaten API-Schlüssel eintragen. Eine Prognose kostet 2 Credits und wird alle 3 Wochen erneuert."
+          "besttime_api_key": "Für die Stoßzeiten der Filiale: Konto auf besttime.app anlegen und den privaten API-Schlüssel eintragen. Eine Prognose kostet 2 Credits und wird alle 3 Wochen erneuert.",
+          "visit_entities": "Ihr Standortverlauf (Home-Assistant-App) zeigt, wie lange der Einkauf gedauert hat. Ohne Auswahl gibt es keine Einkaufsdauer. Mit einer Zone um die Filiale wird sie genau."
         }
       }
     },
@@ -90,7 +92,8 @@
       "offers_upcoming": { "name": "Kommende Angebote" },
       "offers_for_you": { "name": "Angebote für gekaufte Artikel" },
       "leaflets": { "name": "Prospekte" },
-      "store_busyness": { "name": "Auslastung der Filiale" }
+      "store_busyness": { "name": "Auslastung der Filiale" },
+      "last_shopping_duration": { "name": "Letzte Einkaufsdauer" }
     }
   },
   "selector": {
@@ -101,7 +104,8 @@
         "items": "Artikel aller Kassenbons",
         "products": "Produkte mit Statistik",
         "offers": "Angebote",
-        "leaflets": "Prospekt-Produkte"
+        "leaflets": "Prospekt-Produkte",
+        "articles": "Artikeldatenbank"
       }
     },
     "format": {

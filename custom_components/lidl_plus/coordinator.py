@@ -17,19 +17,22 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from . import besttime
-from ._lidlplus import analytics, export
+from ._lidlplus import analytics, articles, export
 from ._lidlplus.api import LidlPlusApi
 from ._lidlplus.exceptions import LoginError, MissingLogin
+from .article_store import article_store
 from .const import (
     BESTTIME_REFRESH_DAYS,
     CONF_BESTTIME_API_KEY,
     CONF_OFFER_STORES,
     CONF_REFRESH_TOKEN,
+    CONF_VISIT_ENTITIES,
     DEFAULT_SCAN_INTERVAL_HOURS,
     DOMAIN,
     FREQUENTLY_BOUGHT_LIMIT,
     KEY_AVERAGE_BASKET,
     KEY_BUSY_TIMES,
+    KEY_CATALOG,
     KEY_CATEGORY_FOOD_SPENDING,
     KEY_CATEGORY_NONFOOD_SPENDING,
     KEY_COUPONS,
@@ -58,6 +61,7 @@ from .const import (
     KEY_SAVINGS_BY_MONTH,
     KEY_SAVINGS_MONTH,
     KEY_SAVINGS_TOTAL,
+    KEY_SHOPPING_DURATION,
     KEY_SHOPPING_FREQUENCY,
     KEY_SPENDING_BY_MONTH,
     KEY_SPENDING_BY_STORE,
@@ -67,6 +71,8 @@ from .const import (
     LOG_LENGTH,
     PRICE_HISTORY_LENGTH,
 )
+from .visits import VisitTracker, receipt_time, store_zones
+from .visits import statistics as visit_statistics
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -134,8 +140,14 @@ def _region_code(region: dict | None) -> int:
 
 
 def active_offers(data: dict[str, Any]) -> list[dict]:
-    """Current and upcoming offers with their status of now, the data of the last update may be hours old"""
-    offers = [{**offer, "status": analytics.offer_status(offer)} for offer in data.get(KEY_OFFERS, [])]
+    """
+    Current and upcoming offers with their status of now (the data of the last update may be hours old) and the key
+    of their article in the article database
+    """
+    offers = [
+        {**offer, "status": analytics.offer_status(offer), "article_key": articles.offer_article_key(offer)}
+        for offer in data.get(KEY_OFFERS, [])
+    ]
     return [offer for offer in offers if offer["status"] != "expired"]
 
 
@@ -186,6 +198,10 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._forecasts: dict[str, Any] | None = None
         # A failed forecast costs a credit as well, it is not tried again too soon: store -> (API key, time)
         self._forecast_failures: dict[str, tuple[str, Any, str]] = {}
+        # Every offer of the cache as of the last update, the leaflets are compared with them
+        self._archived_offers: list[dict] | None = None
+        # Arrival and departure at the stores of the receipts, from the locations of the persons
+        self._visits = VisitTracker(hass, config_entry.entry_id)
 
     def _log(self, level: str, message: str) -> None:
         """Log to HA logger and keep entry in internal log."""
@@ -239,8 +255,50 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception:  # noqa: BLE001
             # The busy hours are an extra, they must never stop the update
             _LOGGER.exception("Could not add the forecast of BestTime.app")
+        try:
+            data[KEY_SHOPPING_DURATION] = await self._async_add_visits(data)
+        except Exception:  # noqa: BLE001
+            # Like the busy hours: an extra that must never stop the update
+            _LOGGER.exception("Could not add the shopping durations")
         data[KEY_LOG] = list(self._log_entries)
         return data
+
+    def visit_entities(self) -> list[str]:
+        """Persons whose locations show the shopping duration: the ones of the options, otherwise all persons"""
+        configured = self.config_entry.options.get(CONF_VISIT_ENTITIES)
+        if configured is not None:
+            return list(configured)
+        return sorted(self.hass.states.async_entity_ids("person"))
+
+    async def _async_add_visits(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Add the visit of the store (arrival, departure, duration) to the receipts of the last days and return the
+        statistics of all visits
+        """
+        receipts = data[KEY_RECEIPTS]
+        now = dt_util.utcnow()
+        # Only the stores of receipts of the last days need their location, and the store of the busy hours
+        recent = [
+            receipt for receipt in receipts if (time := receipt_time(receipt)) and now - time < timedelta(days=31)
+        ]
+        store_ids = [receipt["store_id"] for receipt in recent if receipt["store_id"]] + data[KEY_OFFER_STORES][:1]
+        locations = await self._visits.async_locations(store_ids, self.api.store)
+        entity_ids = self.visit_entities()
+        visits = await self._visits.async_update(receipts, locations, entity_ids)
+        for receipt in receipts:
+            receipt["visit"] = visits.get(receipt["id"])
+        store = None
+        if data[KEY_OFFER_STORES] and (location := locations.get(data[KEY_OFFER_STORES][0])):
+            busy_store = (data.get(KEY_BUSY_TIMES) or {}).get("store") or {}
+            store = {
+                "id": data[KEY_OFFER_STORES][0],
+                "name": busy_store.get("name") or data[KEY_OFFER_STORES][0],
+                "latitude": location[0],
+                "longitude": location[1],
+                # A zone makes the companion app report the arrival and departure right away
+                "zones": store_zones(self.hass, location),
+            }
+        return {**visit_statistics(visits, receipts, now), "entities": entity_ids, "store": store}
 
     async def _async_add_forecast(self, busy: dict[str, Any] | None) -> dict[str, Any] | None:
         """Add the busy hours forecast of BestTime.app for the store, created again every 3 weeks"""
@@ -321,22 +379,23 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         if self._sync_public_data(offer_stores, leaflet_region):
             cache = self.api.cached_data()
+        archived_offers = analytics.archived_offers(cache.get("offers"))
+        self._archived_offers = archived_offers
         offers = analytics.mark_bought_offers(
             [
                 offer
-                for offer in analytics.archived_offers(cache.get("offers"))
+                for offer in archived_offers
                 if offer["status"] != "expired" and set(offer["stores"]) & set(offer_stores)
             ],
             items,
         )
         # Leaflets of the region that have not ended, with pages and products; all others stay in the cache
-        leaflets = [
-            leaflet
-            for leaflet in analytics.leaflets_of_region(
-                analytics.archived_leaflets(cache.get("leaflets"), now.date()), _region_code(leaflet_region)
-            )
-            if leaflet["status"] != "expired"
-        ]
+        regional_leaflets = analytics.leaflets_of_region(
+            analytics.archived_leaflets(cache.get("leaflets"), now.date()), _region_code(leaflet_region)
+        )
+        leaflets = [leaflet for leaflet in regional_leaflets if leaflet["status"] != "expired"]
+        # Every article of the receipts, of all offers seen so far and of the leaflets of the region
+        catalog = articles.article_catalog(tickets, archived_offers, regional_leaflets)
 
         # 5. Coupons and loyalty ID (separate endpoints, failures are tolerated)
         if sync_error is None:
@@ -373,6 +432,9 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             KEY_LEAFLETS: leaflets,
             KEY_LEAFLET_REGION: leaflet_region,
             KEY_BUSY_TIMES: self._busy_times(offer_stores, directory, stores, tickets),
+            KEY_CATALOG: catalog,
+            # Added after the update, the locations are in the database of Home Assistant
+            KEY_SHOPPING_DURATION: previous.get(KEY_SHOPPING_DURATION),
             KEY_DATA_VERSION: dt_util.utcnow().isoformat(),
             KEY_COUPONS: coupons,
             KEY_COUPONS_AVAILABLE: len(coupons) - activated,
@@ -459,18 +521,34 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return await self.hass.async_add_executor_job(self.api.cached_leaflets, dt_util.now().date(), region)
 
     async def async_leaflet(self, leaflet_id: str) -> dict | None:
-        """A leaflet with its pages and products, None if it is not in the cache"""
-        for leaflet in active_leaflets(self.data or {}):
-            if leaflet["id"] == leaflet_id:
-                return leaflet
-        return next((leaflet for leaflet in await self.async_all_leaflets() if leaflet["id"] == leaflet_id), None)
+        """
+        A leaflet with its pages and products, and the offers printed on its pages (key "offers", see
+        articles.offers_of_leaflet); None if it is not in the cache
+        """
+        leaflet = next((leaflet for leaflet in active_leaflets(self.data or {}) if leaflet["id"] == leaflet_id), None)
+        if leaflet is None:
+            leaflet = next((entry for entry in await self.async_all_leaflets() if entry["id"] == leaflet_id), None)
+        if leaflet is None:
+            return None
+        # The offers of the last update, reading the cache file again would take long on small computers
+        offers = self._archived_offers if self._archived_offers is not None else await self.async_all_offers()
+        found = await self.hass.async_add_executor_job(articles.offers_of_leaflet, leaflet, offers)
+        return {
+            **leaflet,
+            "offers": [
+                # The package like "Je 500 g", without the purchase limit and the prices of the further lines
+                {**offer, "packaging": articles.packaging(offer), "article_key": articles.offer_article_key(offer)}
+                for offer in found
+            ],
+        }
 
     async def async_export(self, dataset: str, file_format: str) -> bytes:
-        """Export file of the cache, see export.export_file"""
-        return await self.hass.async_add_executor_job(self._export, dataset, file_format)
+        """Export file of the cache with the details of the articles added by hand, see export.export_file"""
+        details = await article_store(self.hass).async_load()
+        return await self.hass.async_add_executor_job(self._export, dataset, file_format, dict(details))
 
-    def _export(self, dataset: str, file_format: str) -> bytes:
-        return export.export_file(self.api.cached_data(), dataset, file_format, dt_util.now().date())
+    def _export(self, dataset: str, file_format: str, details: dict[str, Any]) -> bytes:
+        return export.export_file(self.api.cached_data(), dataset, file_format, dt_util.now().date(), details)
 
     def _fetch_coupons(self) -> list[dict]:
         try:

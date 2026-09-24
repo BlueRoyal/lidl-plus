@@ -1,5 +1,5 @@
 """
-Export of receipts, articles, products, offers and leaflets
+Export of receipts, articles, products, offers, leaflets and the article database
 
 CSV files are made for spreadsheets with German settings (semicolon, decimal comma, UTF-8 with BOM),
 JSON keeps the values as they are. The ZIP file contains all tables and the complete cache.
@@ -10,9 +10,9 @@ import io
 import json
 import zipfile
 
-from . import analytics
+from . import analytics, articles
 
-DATASETS = ("receipts", "items", "products", "offers", "leaflets")
+DATASETS = ("receipts", "items", "products", "offers", "leaflets", "articles")
 FORMATS = ("csv", "json", "zip")
 
 RECEIPT_COLUMNS = [
@@ -104,6 +104,34 @@ LEAFLET_COLUMNS = [
     "url",
     "pdf",
     "regions",
+]
+ARTICLE_COLUMNS = [
+    "key",
+    "name",
+    "brand",
+    "lidl_name",
+    "sources",
+    "article_numbers",
+    "barcodes",
+    "package_size",
+    "packaging",
+    "price_per_unit",
+    "purchase_count",
+    "last_bought",
+    "last_price",
+    "unit",
+    "total_spent",
+    "category",
+    "nutrition_basis",
+    *articles.NUTRIENTS,
+    "ingredients",
+    "notes",
+    "photos",
+    "product_id",
+    "url",
+    "first_seen",
+    "last_seen",
+    "updated",
 ]
 
 
@@ -224,6 +252,30 @@ def leaflet_rows(leaflets):
     return rows
 
 
+def article_database(tickets, offers, leaflets=(), article_details=None):
+    """
+    All articles of the receipts, offers and leaflets, with the details added by hand (see articles.merge_user_data)
+    """
+    return articles.merge_user_data(articles.article_catalog(tickets, offers, leaflets), article_details or {})
+
+
+def article_rows(article_list):
+    """One row per article of the article database (see article_database), sorted by name"""
+    rows = []
+    for article in sorted(article_list.values(), key=lambda entry: (analytics.url_slug(entry["name"]), entry["key"])):
+        rows.append(
+            {
+                **article,
+                **{nutrient: article["nutrition"].get(nutrient) for nutrient in articles.NUTRIENTS},
+                "sources": ", ".join(article["sources"]),
+                "article_numbers": ", ".join(article["article_numbers"]),
+                "barcodes": ", ".join(article["barcodes"]),
+                "photos": len(article["images"]),
+            }
+        )
+    return rows
+
+
 def _csv_value(value):
     if isinstance(value, bool):
         return "ja" if value else "nein"
@@ -244,8 +296,11 @@ def to_csv(rows, columns):
     return "﻿" + output.getvalue()
 
 
-def dataset(name, tickets, offers, leaflets=()):
-    """Rows and columns of a dataset: "receipts", "items", "products", "offers" or "leaflets" """
+def dataset(name, tickets, offers, leaflets=(), article_details=None):
+    """
+    Rows and columns of a dataset: "receipts", "items", "products", "offers", "leaflets" or "articles"
+    (with the details added by hand by article key, see articles.merge_user_data)
+    """
     if name == "receipts":
         return receipt_rows(tickets), RECEIPT_COLUMNS
     if name == "items":
@@ -256,15 +311,18 @@ def dataset(name, tickets, offers, leaflets=()):
         return offer_rows(offers), OFFER_COLUMNS
     if name == "leaflets":
         return leaflet_rows(leaflets), LEAFLET_COLUMNS
+    if name == "articles":
+        return article_rows(article_database(tickets, offers, leaflets, article_details)), ARTICLE_COLUMNS
     raise ValueError(f"Unknown dataset {name}, use one of {', '.join(DATASETS)}")
 
 
-def export_file(cache, name="all", file_format="csv", today=None):
+def export_file(cache, name="all", file_format="csv", today=None, article_details=None):
     """
     Export of the cache content (see LidlPlusApi.cached_data) as bytes.
 
     name is one of DATASETS, exported as CSV or JSON, or "all": a ZIP file with every table and the complete cache.
-    today is the local date for the status of the leaflets.
+    today is the local date for the status of the leaflets, article_details are the details of the articles added
+    by hand (see articles.merge_user_data).
     """
     if name not in (*DATASETS, "all") or file_format not in FORMATS:
         raise ValueError(f"Unknown export {name} as {file_format}, use one of {', '.join((*DATASETS, 'all'))}")
@@ -273,19 +331,21 @@ def export_file(cache, name="all", file_format="csv", today=None):
     offers = analytics.mark_bought_offers(analytics.archived_offers(cache.get("offers")), items)
     leaflets = analytics.archived_leaflets(cache.get("leaflets"), today)
     if name == "all" or file_format == "zip":
-        return to_zip(tickets, offers, cache, leaflets)
-    rows, columns = dataset(name, tickets, offers, leaflets)
+        return to_zip(tickets, offers, cache, leaflets, article_details)
+    rows, columns = dataset(name, tickets, offers, leaflets, article_details)
     if file_format == "json":
         return json.dumps(rows, ensure_ascii=False, indent=2).encode("utf-8")
     return to_csv(rows, columns).encode("utf-8")
 
 
-def to_zip(tickets, offers, cache, leaflets=()):
-    """ZIP file with a CSV file per dataset and the complete cache as JSON"""
+def to_zip(tickets, offers, cache, leaflets=(), article_details=None):
+    """ZIP file with a CSV file per dataset, the complete cache and the details of the articles added by hand"""
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in DATASETS:
-            rows, columns = dataset(name, tickets, offers, leaflets)
+            rows, columns = dataset(name, tickets, offers, leaflets, article_details)
             archive.writestr(f"{name}.csv", to_csv(rows, columns))
         archive.writestr("lidl_plus_cache.json", json.dumps(cache, ensure_ascii=False, indent=2))
+        if article_details:
+            archive.writestr("lidl_plus_articles.json", json.dumps(article_details, ensure_ascii=False, indent=2))
     return output.getvalue()

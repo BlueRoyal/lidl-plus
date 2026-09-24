@@ -11,6 +11,7 @@ from .const import (
     CONF_REFRESH_TOKEN,
     KEY_AVERAGE_BASKET,
     KEY_BUSY_TIMES,
+    KEY_CATALOG,
     KEY_CATEGORY_FOOD_SPENDING,
     KEY_CATEGORY_NONFOOD_SPENDING,
     KEY_COUPONS,
@@ -27,6 +28,7 @@ from .const import (
     KEY_OFFERS,
     KEY_PRODUCTS,
     KEY_RECEIPTS,
+    KEY_SHOPPING_DURATION,
     KEY_SHOPPING_FREQUENCY,
     KEY_SPENDING_BY_STORE,
     KEY_TOTAL_TICKETS,
@@ -69,6 +71,14 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: LidlPlu
             "forecast": bool((data.get(KEY_BUSY_TIMES) or {}).get("forecast")),
             "forecast_error": (data.get(KEY_BUSY_TIMES) or {}).get("forecast_error"),
         },
+        # Without the persons, times and places of the visits
+        "shopping_duration": {
+            "persons": len((data.get(KEY_SHOPPING_DURATION) or {}).get("entities") or []),
+            "visits": (data.get(KEY_SHOPPING_DURATION) or {}).get("visits"),
+            "store_location_known": bool((data.get(KEY_SHOPPING_DURATION) or {}).get("store")),
+            "store_zone": bool(((data.get(KEY_SHOPPING_DURATION) or {}).get("store") or {}).get("zones")),
+            "receipts_with_visit": sum(1 for receipt in receipts if receipt.get("visit")),
+        },
         "summary": {key: data.get(key) for key in _SUMMARY_KEYS},
         "counts": {
             "receipts": len(receipts),
@@ -80,11 +90,13 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: LidlPlu
             "offers": len(data.get(KEY_OFFERS, [])),
             "leaflets": len(data.get(KEY_LEAFLETS, [])),
             "leaflets_without_products": sum(1 for leaflet in data.get(KEY_LEAFLETS, []) if not leaflet["products"]),
+            "articles": len(data.get(KEY_CATALOG) or {}),
         },
         # A few receipts (without receipt ID and store) help to debug the parsing of the receipt HTML
         "latest_receipts": [
             {"date": receipt.get("date"), "total": receipt.get("total"), "items": receipt.get("items", [])}
             for receipt in receipts[:3]
         ],
+        "latest_visits": [(receipt.get("visit") or {}).get("status") for receipt in receipts[:10]],
         "log": data.get(KEY_LOG, []),
     }

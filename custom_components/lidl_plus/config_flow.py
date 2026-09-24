@@ -19,6 +19,8 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow
 from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -36,6 +38,7 @@ from .const import (
     CONF_LANGUAGE,
     CONF_OFFER_STORES,
     CONF_REFRESH_TOKEN,
+    CONF_VISIT_ENTITIES,
     DOMAIN,
     KEY_STORES,
 )
@@ -226,6 +229,7 @@ class LidlPlusOptionsFlow(OptionsFlow):
         self._choices: dict[str, str] = {}
         self._selected: list[str] = []
         self._api_key: str | None = None
+        self._persons: list[str] | None = None
 
     def _schema(self, default: list[str]) -> vol.Schema:
         options = [SelectOptionDict(value=key, label=label) for key, label in self._choices.items()]
@@ -238,6 +242,9 @@ class LidlPlusOptionsFlow(OptionsFlow):
                 vol.Optional(CONF_BESTTIME_API_KEY, description={"suggested_value": self._api_key}): TextSelector(
                     TextSelectorConfig(type=TextSelectorType.PASSWORD)
                 ),
+                vol.Optional(CONF_VISIT_ENTITIES, default=self._persons or []): EntitySelector(
+                    EntitySelectorConfig(domain="person", multiple=True)
+                ),
             }
         )
 
@@ -246,6 +253,10 @@ class LidlPlusOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if self._api_key is None:
             self._api_key = self.config_entry.options.get(CONF_BESTTIME_API_KEY) or ""
+        if self._persons is None:
+            # Without the option all persons are used
+            configured = self.config_entry.options.get(CONF_VISIT_ENTITIES)
+            self._persons = list(configured if configured is not None else self.hass.states.async_entity_ids("person"))
         if not self._choices:
             coordinator = getattr(self.config_entry, "runtime_data", None)
             data = (coordinator.data if coordinator else None) or {}
@@ -256,6 +267,7 @@ class LidlPlusOptionsFlow(OptionsFlow):
         if user_input is not None:
             self._selected = user_input.get(CONF_OFFER_STORES, [])
             self._api_key = (user_input.get(CONF_BESTTIME_API_KEY) or "").strip()
+            self._persons = list(user_input.get(CONF_VISIT_ENTITIES, []))
             if query := (user_input.get("search") or "").strip():
                 try:
                     found = await self.hass.async_add_executor_job(self._search, query)
@@ -280,7 +292,8 @@ class LidlPlusOptionsFlow(OptionsFlow):
     @callback
     def _async_save(self) -> ConfigFlowResult:
         # Without a selection the most visited store of the receipts is used
-        options: dict[str, Any] = {CONF_OFFER_STORES: self._selected}
+        # An empty list turns the shopping duration off
+        options: dict[str, Any] = {CONF_OFFER_STORES: self._selected, CONF_VISIT_ENTITIES: self._persons or []}
         if self._api_key:
             options[CONF_BESTTIME_API_KEY] = self._api_key
         if coordinator := getattr(self.config_entry, "runtime_data", None):

@@ -126,6 +126,12 @@ class FakeApiState:
         self.leaflets_by_region: dict[int, Any] = {}
         self.region_calls: list[str] = []
         self.synced_regions: list[int | None] = []
+        # Locations of the stores (store API of Lidl Plus), for the shopping duration
+        self.store_locations = {
+            "DE1234": {"latitude": 51.1633, "longitude": 10.4477},
+            "DE2000": {"latitude": 51.1450, "longitude": 10.4600},
+        }
+        self.store_calls: list[str] = []
         self.found_stores = [
             {
                 "storeKey": "DE3000",
@@ -186,6 +192,13 @@ class FakeLidlPlusApi:
 
     def cached_offers(self) -> list[dict]:
         return analytics.archived_offers(self._state.offer_archive)
+
+    def store(self, store_key: str) -> dict:
+        """Like LidlPlusApi.store: the details of a store of the public store API"""
+        self._state.store_calls.append(store_key)
+        if self._state.public_error:
+            raise self._state.public_error
+        return {"storeKey": store_key, "location": self._state.store_locations[store_key]}
 
     def store_directory(self, store_key: str) -> dict | None:
         self._state.region_calls.append(store_key)

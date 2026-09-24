@@ -16,6 +16,7 @@ from custom_components.lidl_plus.const import (
     CONF_COUNTRY,
     CONF_LANGUAGE,
     CONF_OFFER_STORES,
+    CONF_VISIT_ENTITIES,
     CONF_REFRESH_TOKEN,
     DOMAIN,
 )
@@ -227,7 +228,7 @@ async def test_options_search_stores(
 
     result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_OFFER_STORES: ["DE3000"]})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert config_entry.options == {CONF_OFFER_STORES: ["DE3000"]}
+    assert config_entry.options == {CONF_OFFER_STORES: ["DE3000"], CONF_VISIT_ENTITIES: []}
 
     # The chosen stores are shown again next time, also without receipts
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
@@ -253,7 +254,7 @@ async def test_options_search_errors(
     # Saving without a store: the most visited store of the receipts is used
     result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_OFFER_STORES: []})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert config_entry.options == {CONF_OFFER_STORES: []}
+    assert config_entry.options == {CONF_OFFER_STORES: [], CONF_VISIT_ENTITIES: []}
 
 
 async def test_flows_without_loyalty_id(hass: HomeAssistant, api_state: FakeApiState) -> None:

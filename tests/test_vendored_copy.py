@@ -12,7 +12,7 @@ def _read(path):
     return path.read_bytes().replace(b"\r\n", b"\n")
 
 
-@pytest.mark.parametrize("name", ["api.py", "analytics.py", "exceptions.py", "export.py"])
+@pytest.mark.parametrize("name", ["api.py", "analytics.py", "articles.py", "exceptions.py", "export.py"])
 def test_vendored_copy_is_identical(name):
     original = _read(ROOT / "lidlplus" / name)
     vendored = _read(ROOT / "custom_components" / "lidl_plus" / "_lidlplus" / name)

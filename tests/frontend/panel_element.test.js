@@ -1,4 +1,5 @@
-// Runtime test of frontend/panel.js: sizing, requests and calls of the page, export, menu rule and event.
+// Runtime test of frontend/panel.js: sizing, requests and calls of the page, export, barcode scanner of the app,
+// menu rule and event.
 const fs = require("fs");
 const path = require("path");
 const assert = require("assert");
@@ -85,7 +86,7 @@ window.eval(code);
   await tick();
   assert.deepStrictEqual([posted[posted.length - 1].msg.type, posted[posted.length - 1].msg.message], ["lidl-plus:error", "Connection lost"]);
 
-  // Calls of the page: only the read-only commands of the integration are passed on
+  // Calls of the page: only the commands of the integration (and the zone of the store) are passed on
   fromPage({ type: "lidl-plus:call", id: 7, request: { type: "lidl_plus/leaflet", leaflet_id: "l1", entry_id: "e1" } });
   await tick();
   assert.strictEqual(JSON.stringify(calls.at(-1)), JSON.stringify({ type: "lidl_plus/leaflet", leaflet_id: "l1", entry_id: "e1" }));
@@ -99,6 +100,56 @@ window.eval(code);
   fromPage({ type: "lidl-plus:call", id: 10, request: { type: "lidl_plus/search", query: "x", entry_id: "broken" } });
   await tick();
   assert.deepStrictEqual([posted.at(-1).msg.id, posted.at(-1).msg.error], [10, "Connection lost"]);
+  for (const type of ["lidl_plus/articles", "lidl_plus/article", "lidl_plus/article_save", "lidl_plus/article_delete",
+    "lidl_plus/barcode", "lidl_plus/article_image", "lidl_plus/article_image_delete", "zone/create"]) {
+    fromPage({ type: "lidl-plus:call", id: 20, request: { type } });
+    await tick();
+    assert.strictEqual(calls.at(-1).type, type);
+  }
+
+  // Barcode scanner: without the Home Assistant app the page scans itself
+  fromPage({ type: "lidl-plus:scan", id: 30 });
+  await tick();
+  // Objects of the page window are compared as JSON, they have other prototypes
+  const same = (actual, expected) => assert.strictEqual(JSON.stringify(actual), JSON.stringify(expected));
+  same([posted.at(-1).msg.id, posted.at(-1).msg.result], [30, { unsupported: true }]);
+  // In the app: its scanner, the results are read before the frontend handles them
+  const fired = [];
+  const handled = [];
+  const frontendBus = (msg) => handled.push(msg);
+  window.externalBus = frontendBus;
+  panel.hass = { ...hass, auth: { external: { config: { hasBarCodeScanner: 1 }, fireMessage: (msg) => fired.push(msg) } } };
+  fromPage({ type: "lidl-plus:scan", id: 31 });
+  await tick();
+  assert.strictEqual(fired[0].type, "bar_code/scan");
+  assert.ok(fired[0].payload.title && fired[0].payload.alternative_option_label);
+  assert.notStrictEqual(window.externalBus, frontendBus);
+  // Other messages of the app are passed on unchanged
+  window.externalBus({ id: 1, type: "command", command: "sidebar/show" });
+  const result = { id: 2, type: "command", command: "bar_code/scan_result", payload: { rawValue: "4056489123453", format: "ean_13" } };
+  window.externalBus(result);
+  await tick();
+  same(posted.at(-1).msg, { type: "lidl-plus:result", id: 31, result: { code: "4056489123453", format: "ean_13" } });
+  assert.deepStrictEqual(fired.map((msg) => msg.type), ["bar_code/scan", "bar_code/close"]);
+  assert.deepStrictEqual(handled.map((msg) => msg.command), ["sidebar/show", "bar_code/scan_result"]);
+  assert.strictEqual(window.externalBus, frontendBus, "the bus of the frontend is restored");
+  // Typing the barcode instead, and messages as JSON text
+  fromPage({ type: "lidl-plus:scan", id: 32 });
+  await tick();
+  window.externalBus(JSON.stringify({ id: 3, type: "command", command: "bar_code/aborted", payload: { reason: "alternative_options" } }));
+  await tick();
+  same(posted.at(-1).msg.result, { cancelled: true, reason: "alternative_options" });
+  assert.strictEqual(window.externalBus, frontendBus);
+  // A new scan replaces a running one
+  fromPage({ type: "lidl-plus:scan", id: 33 });
+  await tick();
+  fromPage({ type: "lidl-plus:scan", id: 34 });
+  await tick();
+  same([posted.at(-1).msg.id, posted.at(-1).msg.result], [33, { cancelled: true, reason: "restarted" }]);
+  window.externalBus({ id: 4, type: "command", command: "bar_code/aborted", payload: { reason: "canceled" } });
+  await tick();
+  same([posted.at(-1).msg.id, posted.at(-1).msg.result], [34, { cancelled: true, reason: "canceled" }]);
+  panel.hass = { ...hass };
 
   // Export: the page has no token, the download gets a signed address and starts in the Home Assistant window
   const downloads = [];
@@ -135,8 +186,14 @@ window.eval(code);
   fromPage({ type: "lidl-plus:toggle-menu" });
   assert.strictEqual(toggled, 1);
 
-  // Detached and attached again: the offset property is set again, no second iframe, listeners cleaned up
+  // Detached and attached again: the offset property is set again, no second iframe, listeners cleaned up,
+  // a running scan of the app ends
+  panel.hass = { ...hass, auth: { external: { config: { hasBarCodeScanner: 1 }, fireMessage: () => {} } } };
+  fromPage({ type: "lidl-plus:scan", id: 40 });
+  await tick();
+  assert.notStrictEqual(window.externalBus, frontendBus);
   host.removeChild(panel);
+  assert.strictEqual(window.externalBus, frontendBus);
   fromPage({ type: "lidl-plus:toggle-menu" });
   assert.strictEqual(toggled, 1, "no listener while disconnected");
   host.appendChild(panel);

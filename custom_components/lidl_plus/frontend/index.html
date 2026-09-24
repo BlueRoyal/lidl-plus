@@ -168,28 +168,49 @@
 <div id="tab-products" class="tab">
 
   <!-- KPI-Karten -->
-  <div class="grid grid-cols-3 gap-3 mb-4" id="productStats"></div>
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4" id="productStats"></div>
 
-  <!-- Filter-Panel -->
+  <!-- Artikeldatenbank: alle gekauften, angebotenen und aus Prospekten bekannten Artikel -->
   <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-      <input type="text" id="productSearch" placeholder="🔍 Artikel suchen…"
+    <div class="flex flex-wrap gap-2 mb-3">
+      <button class="btn btn-primary !text-sm !px-4 !py-2" onclick="openScanner()">📷 Barcode scannen</button>
+      <button class="btn !text-sm !px-4 !py-2" onclick="newArticle()">＋ Neuer Artikel</button>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      <input type="search" id="productSearch" placeholder="🔍 Name, Marke, Barcode, Zutat…"
              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]"
-             oninput="filterProducts()">
+             oninput="scheduleArticleSearch()">
+      <select id="productKind"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="loadArticles()">
+        <option value="">Alle Artikel</option>
+        <option value="bought">Gekaufte Artikel</option>
+        <option value="offers">Aus Angeboten</option>
+        <option value="leaflets">Aus Prospekten</option>
+        <option value="own">Selbst angelegt</option>
+        <option value="details">Mit eigenen Angaben</option>
+        <option value="nutrition">Mit Nährwerten</option>
+        <option value="no_nutrition">Ohne Nährwerte</option>
+        <option value="ingredients">Mit Zutaten / Inhaltsstoffen</option>
+        <option value="photos">Mit Fotos</option>
+        <option value="barcode">Mit Barcode</option>
+      </select>
       <select id="productSort"
               class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
-              onchange="filterProducts()">
+              onchange="loadArticles()">
         <option value="count-desc">Häufig gekauft</option>
         <option value="spent-desc">Meiste Ausgaben</option>
         <option value="savings-desc">Meiste Ersparnis</option>
         <option value="name-asc">Name A–Z</option>
-        <option value="last-desc">Zuletzt gekauft</option>
+        <option value="bought-desc">Zuletzt gekauft</option>
+        <option value="last-desc">Zuletzt gesehen</option>
+        <option value="updated-desc">Zuletzt bearbeitet</option>
         <option value="price-desc">Höchster Preis</option>
         <option value="price-asc">Niedrigster Preis</option>
       </select>
       <select id="productTrend"
               class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
-              onchange="filterProducts()">
+              onchange="loadArticles()">
         <option value="">Alle Preistrends</option>
         <option value="up">↑ Preis gestiegen</option>
         <option value="down">↓ Preis gesunken</option>
@@ -197,18 +218,21 @@
       </select>
       <select id="productPeriod"
               class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
-              onchange="filterProducts()">
+              onchange="loadArticles()">
         <option value="">Alle Zeiträume</option>
-        <option value="30">Letzte 30 Tage</option>
-        <option value="90">Letzte 90 Tage</option>
-        <option value="180">Letzte 6 Monate</option>
-        <option value="365">Letztes Jahr</option>
+        <option value="30">Gekauft in 30 Tagen</option>
+        <option value="90">Gekauft in 90 Tagen</option>
+        <option value="180">Gekauft in 6 Monaten</option>
+        <option value="365">Gekauft im letzten Jahr</option>
       </select>
     </div>
     <p class="mt-2.5 text-xs text-gray-400" id="productCount"></p>
   </div>
 
   <div id="productGrid" class="text-center py-16 text-gray-400">Lade Artikel…</div>
+  <div class="text-center mt-4">
+    <button id="productMore" class="btn hidden !text-sm !px-4 !py-2" onclick="loadArticles(true)">Weitere Artikel laden</button>
+  </div>
 
 </div>
 
@@ -281,6 +305,12 @@
     <p class="text-xs text-gray-400 mt-2" id="busySource"></p>
   </div>
 
+  <!-- Einkaufsdauer aus dem Standort der Home-Assistant-App -->
+  <div class="bg-white rounded-2xl p-5 shadow-sm mb-4">
+    <h2 class="text-base font-semibold text-gray-800 mb-2">🛒 Einkaufsdauer</h2>
+    <div id="durationBody" class="text-sm text-gray-600"></div>
+  </div>
+
 </div>
 
 </div><!-- /max-w-7xl -->
@@ -288,22 +318,30 @@
 <!-- ══════════════════════════════════════════════════════════════════════════
      PRODUKT-DETAIL MODAL
 ══════════════════════════════════════════════════════════════════════════ -->
-<div class="modal-overlay fixed inset-0 bg-black/50 z-50 items-center justify-center p-4"
+<!-- Above the leaflet dialog: articles are opened from a leaflet as well -->
+<div class="modal-overlay fixed inset-0 bg-black/50 z-[60] items-center justify-center p-4"
      id="productModal" onclick="closeModal(event)">
-  <div class="bg-white rounded-2xl w-full max-w-xl max-h-[88vh] overflow-y-auto shadow-2xl">
-    <div class="flex items-start justify-between px-6 pt-5 pb-3 sticky top-0 bg-white rounded-t-2xl border-b border-gray-100">
-      <h2 class="text-base font-bold text-[#003882] pr-4 leading-tight" id="modalTitle"></h2>
+  <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl">
+    <div class="flex items-start justify-between px-6 pt-5 pb-3 sticky top-0 bg-white rounded-t-2xl border-b border-gray-100 z-10">
+      <div class="min-w-0 pr-4">
+        <div class="text-[10px] uppercase tracking-wide text-gray-400 truncate" id="modalBrand"></div>
+        <h2 class="text-base font-bold text-[#003882] leading-tight" id="modalTitle"></h2>
+      </div>
       <button class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0 mt-[-2px]"
               onclick="closeProductModal()" aria-label="Schließen">×</button>
     </div>
     <div class="px-6 pb-6 pt-4">
-      <div id="modalStats" class="grid grid-cols-3 gap-2 mb-3"></div>
-      <div id="modalSavings" class="text-xs text-green-700 mb-4"></div>
-      <div id="modalChartWrapper" style="position:relative;height:200px;margin-bottom:20px">
-        <canvas id="modalPriceChart"></canvas>
+      <div id="articleHead"></div>
+      <div id="articlePurchases">
+        <div id="modalStats" class="grid grid-cols-3 gap-2 mb-3"></div>
+        <div id="modalSavings" class="text-xs text-green-700 mb-4"></div>
+        <div id="modalChartWrapper" style="position:relative;height:200px;margin-bottom:20px">
+          <canvas id="modalPriceChart"></canvas>
+        </div>
+        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Preishistorie</h3>
+        <div id="modalHistory" class="mb-2"></div>
       </div>
-      <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Preishistorie</h3>
-      <div id="modalHistory"></div>
+      <div id="articleDetails"></div>
     </div>
   </div>
 </div>
@@ -320,6 +358,33 @@
               onclick="closeLeafletModal()" aria-label="Schließen">×</button>
     </div>
     <div class="px-6 pb-6 pt-4" id="leafletBody"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     BARCODE SCANNEN
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay fixed inset-0 bg-black/50 z-[70] items-center justify-center p-4"
+     id="scanModal" onclick="closeModal(event)">
+  <div class="bg-white rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
+    <div class="flex items-start justify-between px-6 pt-5 pb-3 sticky top-0 bg-white rounded-t-2xl border-b border-gray-100 z-10">
+      <h2 class="text-base font-bold text-[#003882] pr-4 leading-tight">Barcode scannen</h2>
+      <button class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0 mt-[-2px]"
+              onclick="closeScanModal()" aria-label="Schließen">×</button>
+    </div>
+    <div class="px-6 pb-6 pt-4">
+      <div id="scanCamera" class="hidden mb-3">
+        <video id="scanVideo" playsinline muted class="w-full rounded-xl bg-black max-h-72 object-cover"></video>
+        <p class="text-xs text-gray-500 mt-1">Halte den Strichcode (EAN) der Verpackung vor die Kamera.</p>
+      </div>
+      <p id="scanHint" class="text-xs text-gray-500 mb-2"></p>
+      <form id="scanForm" class="flex gap-2" onsubmit="submitBarcode(event)">
+        <input type="text" id="scanInput" inputmode="numeric" autocomplete="off" placeholder="Barcode eingeben, z. B. 4056489123453"
+               class="flex-1 min-w-0 border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]">
+        <button type="submit" class="btn btn-primary !text-sm !px-4">Suchen</button>
+      </form>
+      <div id="scanResult" class="mt-4"></div>
+    </div>
   </div>
 </div>
 
@@ -410,13 +475,13 @@ function requestData() {
 }
 
 // A call answered by the panel element with lidl-plus:result
-function postCall(message) {
+function postCall(message, timeout = CALL_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const id = ++callCounter;
     const timer = setTimeout(() => {
       pendingCalls.delete(id);
       reject(new Error('keine Antwort von Home Assistant'));
-    }, CALL_TIMEOUT_MS);
+    }, timeout);
     pendingCalls.set(id, {resolve, reject, timer});
     window.parent.postMessage({...message, id}, location.origin);
   });
@@ -483,7 +548,7 @@ function applyData(data) {
   for (const [part, render] of [
     ['Übersicht', renderOverview],
     ['Kassenbons', () => { populateStoreFilter(); filterReceipts(); }],
-    ['Artikel', () => { renderProductStats(allProducts); filterProducts(); }],
+    ['Artikel', () => { renderBoughtArticles(); refreshArticles(); }],
     ['Angebote', () => { renderOfferStores(); filterOffers(); }],
     ['Prospekte', renderLeaflets],
     ['Stoßzeiten', () => { if (document.getElementById('tab-busy').classList.contains('active')) renderBusy(); }],
@@ -530,6 +595,8 @@ function showTab(name, btn) {
   btn.classList.add('active');
   // Charts need a visible canvas, so the busy hours are drawn when their tab is shown
   if (name === 'busy') renderBusy();
+  // The article database is loaded when its tab is shown
+  if (name === 'products' && (!articlesFromServer || articlesStale)) loadArticles();
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────
@@ -764,6 +831,7 @@ function renderReceipts(receipts) {
            data-receipt-id="${esc(r.id)}" onclick="toggleReceipt(this)">
         <span class="font-semibold text-[#003882] whitespace-nowrap text-sm">${fmtDate(r.date)}</span>
         <span class="flex-1 text-gray-600 truncate">${esc(r.store||'Unbekannt')}</span>
+        ${r.visit && r.visit.status === 'ok' ? `<span class="text-xs text-gray-500 whitespace-nowrap" title="Zeit im Markt">🕒 ${esc(r.visit.minutes)} Min.</span>` : ''}
         ${r.savings > 0 ? `<span class="text-xs text-green-600 whitespace-nowrap hidden sm:inline">${fmt(r.savings)} gespart</span>` : ''}
         <span class="font-bold text-green-600 whitespace-nowrap">${fmt(r.total)}</span>
         <span class="text-xs text-gray-400 whitespace-nowrap hidden sm:inline">${(r.items||[]).length} Artikel</span>
@@ -786,7 +854,9 @@ function renderReceiptItems(receipt) {
         <td class="pl-5 sm:pl-8 pr-2 sm:pr-4 py-1 text-xs" colspan="3">↳ ${esc(d.text || 'Rabatt')}</td>
         <td class="px-2 sm:px-4 py-1 text-xs text-right whitespace-nowrap">${fmt(d.amount)}</td>
       </tr>`).join('');
-    return `<tr class="border-t border-gray-50 hover:bg-gray-50/70">
+    // Deposits are no articles of the article database
+    const article = i.is_deposit ? '' : ` data-article-key="nr:${esc(i.id)}"`;
+    return `<tr class="border-t border-gray-50 hover:bg-gray-50/70${article ? ' cursor-pointer' : ''}"${article}>
       <td class="px-2 sm:px-4 py-2.5 text-gray-800">${esc(i.name||i.id)}${deposit}</td>
       <td class="px-2 sm:px-4 py-2.5 text-gray-500 text-right whitespace-nowrap">${fmtQty(qty)}${unit}</td>
       <td class="px-2 sm:px-4 py-2.5 text-gray-500 text-right whitespace-nowrap">${price?fmt(price)+(i.unit?'/'+esc(i.unit):''):'–'}</td>
@@ -795,6 +865,7 @@ function renderReceiptItems(receipt) {
   }).join('');
 
   const summary = [];
+  if (receipt.visit) summary.push([`🕒 Im Markt: ${esc(visitText(receipt.visit))}`, null]);
   (receipt.deposit_returns || []).forEach(d => summary.push([
     'Pfandrückgabe' + (d.count ? ` (${esc(d.count)} × ${fmt(d.unit_amount)})` : ''), fmt(d.amount),
   ]));
@@ -811,12 +882,20 @@ function renderReceiptItems(receipt) {
       <th class="px-2 sm:px-4 py-2 text-right font-medium">Gesamt</th>
     </tr></thead>
     <tbody>${rows||'<tr><td colspan="4" class="px-2 sm:px-4 py-5 text-center text-gray-400">Keine Artikel</td></tr>'}</tbody>
-    <tfoot class="border-t-2 border-gray-100 text-gray-600">${summary.map(([label, value]) => `<tr>
+    <tfoot class="border-t-2 border-gray-100 text-gray-600">${summary.map(([label, value]) => value === null
+      ? `<tr><td class="px-2 sm:px-4 py-1.5" colspan="4">${label}</td></tr>`
+      : `<tr>
       <td class="px-2 sm:px-4 py-1.5" colspan="3">${label}</td>
       <td class="px-2 sm:px-4 py-1.5 text-right whitespace-nowrap">${value}</td>
     </tr>`).join('')}</tfoot>
   </table>`;
 }
+
+// An article of a receipt opens the article database
+document.getElementById('receiptList').addEventListener('click', event => {
+  const row = event.target.closest('tr[data-article-key]');
+  if (row) openArticle(row.dataset.articleKey);
+});
 
 function toggleReceipt(header) {
   const items = header.nextElementSibling;
@@ -829,116 +908,282 @@ function toggleReceipt(header) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ARTIKEL
+// ARTIKEL (Artikeldatenbank)
 // ══════════════════════════════════════════════════════════════════════════════
-function renderProductStats(products) {
-  const totalSpent = products.reduce((s,p)=>s+p.total_spent, 0);
-  const totalBuys  = products.reduce((s,p)=>s+p.purchase_count, 0);
+const ARTICLE_PAGE = 60;
+// Nutrition values per 100 g or 100 ml, like on the packages
+const NUTRIENTS = [
+  ['energy_kj', 'Energie', 'kJ'],
+  ['energy_kcal', 'Energie', 'kcal'],
+  ['fat', 'Fett', 'g'],
+  ['saturated_fat', 'davon gesättigte Fettsäuren', 'g'],
+  ['carbohydrates', 'Kohlenhydrate', 'g'],
+  ['sugars', 'davon Zucker', 'g'],
+  ['fiber', 'Ballaststoffe', 'g'],
+  ['protein', 'Eiweiß', 'g'],
+  ['salt', 'Salz', 'g'],
+];
+const IMAGE_KINDS = {nutrition: 'Nährwerte', ingredients: 'Zutaten / Inhaltsstoffe', front: 'Vorderseite', other: 'Sonstiges'};
+const INPUT = 'w-full border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white';
+let articleResults = [], articleTotal = 0, articleRequest = 0, articleTimer = null;
+// The list comes from the article database once its tab was shown, until then the bought articles are shown
+let articlesFromServer = false, articlesStale = false;
+// Article of the dialog, its barcodes while they are edited, and values taken from another database
+let currentArticle = null, editBarcodes = [], pendingSources = {}, pendingImage = '', articleDialogRequest = 0;
+
+// Only the photos of the integration, with their signed address
+const imageUrl = u => /^\/api\/lidl_plus\/images\/[0-9a-f]{32}(\?[\w.=&%-]*)?$/.test(String(u ?? '')) ? String(u) : '';
+const decimalText = v => v == null || v === '' ? '' : String(v).replace('.', ',');
+// "12,5" and "12.5" are numbers, an empty field has no value, everything else is NaN
+function parseDecimal(text) {
+  const value = String(text ?? '').replace(/\s/g, '').replace(',', '.');
+  if (!value) return null;
+  return /^\d+(\.\d+)?$/.test(value) ? parseFloat(value) : NaN;
+}
+
+// A bought article of the panel data in the form of the article database
+function productAsArticle(p) {
+  return {
+    key: `nr:${p.id}`, name: p.name || p.id, brand: '', image: '', sources: ['receipts'],
+    purchase_count: p.purchase_count, last_price: p.last_price, last_bought: p.last_date, last_seen: p.last_date,
+    unit: p.unit || '', price_trend: getPriceTrend(p), barcodes: [], has_nutrition: false, image_count: 0,
+    offer: null, leaflet: null,
+  };
+}
+
+function renderArticleStats(stats) {
+  const known = stats || {articles: null, bought: allProducts.length, with_details: null, with_nutrition: null};
   document.getElementById('productStats').innerHTML = [
-    {val:products.length,    label:'Einzigartige Artikel', color:'text-[#003882]'},
-    {val:totalBuys,          label:'Käufe gesamt',          color:'text-purple-600'},
-    {val:fmt(totalSpent),    label:'Gesamtausgaben',        color:'text-green-600'},
-  ].map(c=>`
+    {val: known.articles, label: 'Artikel in der Datenbank', color: 'text-[#003882]'},
+    {val: known.bought, label: 'Davon gekauft', color: 'text-purple-600'},
+    {val: known.with_details, label: 'Mit eigenen Angaben', color: 'text-green-600'},
+    {val: known.with_nutrition, label: 'Mit Nährwerten', color: 'text-orange-500'},
+  ].map(c => `
     <div class="bg-white rounded-2xl p-4 shadow-sm text-center">
-      <div class="text-lg font-bold ${c.color}">${c.val}</div>
+      <div class="text-lg font-bold ${c.color}">${c.val == null ? '…' : esc(c.val)}</div>
       <div class="text-xs text-gray-400 mt-0.5">${c.label}</div>
     </div>`).join('');
 }
 
-function filterProducts() {
-  const q      = document.getElementById('productSearch').value.toLowerCase();
-  const sort   = document.getElementById('productSort').value;
-  const trend  = document.getElementById('productTrend').value;
-  const period = parseInt(document.getElementById('productPeriod').value)||0;
-  const cutoff = period ? new Date(Date.now()-period*864e5).toISOString().slice(0,10) : '';
-
-  let filtered = allProducts.filter(p => {
-    if (q && !(p.name||'').toLowerCase().includes(q)) return false;
-    if (trend && getPriceTrend(p) !== trend) return false;
-    if (cutoff && (p.last_date||'').slice(0,10) < cutoff) return false;
-    return true;
-  });
-
-  filtered.sort((a,b) => {
-    if (sort==='count-desc')   return b.purchase_count - a.purchase_count;
-    if (sort==='spent-desc')   return b.total_spent - a.total_spent;
-    if (sort==='savings-desc') return (b.savings||0) - (a.savings||0);
-    if (sort==='name-asc')     return (a.name||'').localeCompare(b.name||'','de');
-    if (sort==='last-desc')    return (b.last_date||'').localeCompare(a.last_date||'');
-    if (sort==='price-desc')   return b.last_price - a.last_price;
-    if (sort==='price-asc')    return a.last_price - b.last_price;
-    return 0;
-  });
-
-  document.getElementById('productCount').textContent =
-    `${filtered.length} von ${allProducts.length} Artikeln`;
-  renderProducts(filtered);
+// Until the article database answered: the bought articles of the panel data
+function renderBoughtArticles() {
+  if (articlesFromServer) return;
+  articleResults = allProducts.map(productAsArticle);
+  articleTotal = articleResults.length;
+  renderArticleStats(null);
+  renderArticles();
 }
 
-function renderProducts(products) {
-  const el = document.getElementById('productGrid');
-  if (!products.length) {
-    el.className = 'text-center py-16 text-gray-400';
-    el.textContent = 'Keine Artikel gefunden.';
+// The list is loaded when its tab is shown, and again after new data
+function refreshArticles() {
+  if (document.getElementById('tab-products').classList.contains('active')) loadArticles();
+  else articlesStale = true;
+}
+
+function scheduleArticleSearch() {
+  clearTimeout(articleTimer);
+  articleTimer = setTimeout(() => loadArticles(), 300);
+}
+
+async function loadArticles(more = false) {
+  clearTimeout(articleTimer);
+  articlesStale = false;
+  const period = parseInt(document.getElementById('productPeriod').value) || 0;
+  const request = ++articleRequest;
+  const fields = {
+    query: document.getElementById('productSearch').value.trim(),
+    kind: document.getElementById('productKind').value,
+    sort: document.getElementById('productSort').value,
+    trend: document.getElementById('productTrend').value,
+    bought_since: period ? new Date(Date.now() - period * 864e5).toISOString().slice(0, 10) : '',
+    offset: more ? articleResults.length : 0,
+    limit: ARTICLE_PAGE,
+  };
+  document.getElementById('productCount').textContent = 'Suche…';
+  try {
+    const result = await wsCall('lidl_plus/articles', fields);
+    if (request !== articleRequest) return;
+    articlesFromServer = true;
+    articleResults = more ? articleResults.concat(result.articles || []) : (result.articles || []);
+    articleTotal = result.total || 0;
+    renderArticleStats(result.statistics);
+    renderArticles();
+  } catch (err) {
+    if (request !== articleRequest) return;
+    document.getElementById('productCount').textContent = 'Die Artikel konnten nicht geladen werden: ' + err.message;
+  }
+}
+
+function renderArticles() {
+  const grid = document.getElementById('productGrid');
+  document.getElementById('productCount').textContent = `${articleResults.length} von ${articleTotal} Artikeln`;
+  document.getElementById('productMore').classList.toggle('hidden', articleResults.length >= articleTotal);
+  if (!articleResults.length) {
+    grid.className = 'text-center py-16 text-gray-400';
+    grid.textContent = 'Keine Artikel gefunden.';
     return;
   }
-  el.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3';
-  el.innerHTML = products.map(p => {
-    const trend = getPriceTrend(p);
-    const trendBadge = trend==='up'
-      ? '<span class="text-[11px] bg-red-100 text-red-600 rounded-full px-2 py-0.5 font-semibold">↑ teurer</span>'
-      : trend==='down'
-      ? '<span class="text-[11px] bg-green-100 text-green-600 rounded-full px-2 py-0.5 font-semibold">↓ günstiger</span>'
-      : '';
-    const unit = p.unit ? '/' + esc(p.unit) : '';
-    return `
-      <div class="bg-white rounded-2xl p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
-           data-product-id="${esc(p.id)}">
-        <div class="font-semibold text-gray-800 leading-tight line-clamp-2 mb-2" style="min-height:2.6em">
-          ${esc(p.name||p.id)}
-        </div>
-        ${trendBadge?`<div class="mb-2.5">${trendBadge}</div>`:'<div class="mb-2.5 h-5"></div>'}
-        <div class="grid grid-cols-2 gap-1.5 text-center">
-          <div class="bg-gray-50 rounded-xl py-2">
-            <div class="text-base font-bold text-[#003882]">${p.purchase_count}×</div>
-            <div class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Käufe</div>
-          </div>
-          <div class="bg-gray-50 rounded-xl py-2">
-            <div class="text-base font-bold text-green-600">${fmt(p.last_price)}${unit}</div>
-            <div class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Akt. Preis</div>
-          </div>
-          <div class="bg-gray-50 rounded-xl py-2">
-            <div class="text-base font-bold text-gray-700">${fmt(p.avg_price)}${unit}</div>
-            <div class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Ø Preis</div>
-          </div>
-          <div class="bg-gray-50 rounded-xl py-2">
-            <div class="text-base font-bold text-gray-700">${fmt(p.total_spent)}</div>
-            <div class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Gesamt</div>
-          </div>
-        </div>
-        <div class="mt-2.5 text-xs text-gray-400 text-center">${fmtDate(p.last_date)}${p.savings > 0 ? ` · <span class="text-green-600">${fmt(p.savings)} gespart</span>` : ''}</div>
-      </div>`;
-  }).join('');
+  grid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3';
+  grid.innerHTML = articleResults.map(renderArticleCard).join('');
+}
+
+// Price of an article: paid last, otherwise of the newest offer or leaflet
+function articlePrice(a) {
+  if (a.last_price != null) return {value: a.last_price, label: 'zuletzt bezahlt'};
+  if (a.offer && a.offer.price != null) return {value: a.offer.price, label: 'im Angebot'};
+  if (a.leaflet && a.leaflet.price != null) return {value: a.leaflet.price, label: 'im Prospekt'};
+  return null;
+}
+
+function articleBadges(a) {
+  const sources = a.sources || [];
+  const badges = [];
+  if (a.purchase_count) badges.push(['bg-blue-50 text-[#003882]', `🧾 ${esc(a.purchase_count)}× gekauft`]);
+  const offer = a.offer || (a.offers || [])[0];
+  if (offer && offer.status && offer.status !== 'expired') {
+    badges.push([offer.status === 'upcoming' ? 'badge-upcoming' : 'badge-current', '🏷️ im Angebot']);
+  } else if (sources.includes('offers')) {
+    badges.push(['bg-gray-100 text-gray-600', '🏷️ Angebot']);
+  }
+  if (sources.includes('leaflets')) badges.push(['bg-gray-100 text-gray-600', '📰 Prospekt']);
+  if (sources.includes('own')) badges.push(['bg-purple-50 text-purple-700', '✏️ Eigener Artikel']);
+  if (a.has_nutrition) badges.push(['bg-green-50 text-green-700', '🥗 Nährwerte']);
+  const photos = a.image_count ?? (a.images || []).length;
+  if (photos) badges.push(['bg-gray-100 text-gray-600', `📷 ${esc(photos)}`]);
+  if ((a.barcodes || []).length) badges.push(['bg-gray-100 text-gray-600', '▮▯▮ Barcode']);
+  if (a.purchase_count && a.price_trend === 'up') badges.push(['bg-red-100 text-red-600', '↑ teurer']);
+  if (a.purchase_count && a.price_trend === 'down') badges.push(['bg-green-100 text-green-600', '↓ günstiger']);
+  return badges.map(([css, text]) => `<span class="badge ${css}">${text}</span>`).join(' ');
+}
+
+function renderArticleCard(a) {
+  const image = safeUrl(a.image), price = articlePrice(a), unit = a.unit ? '/' + esc(a.unit) : '';
+  const when = a.last_bought ? `gekauft ${fmtDate(a.last_bought)}` : a.last_seen ? `gesehen ${fmtDate(a.last_seen)}` : '';
+  return `<div class="bg-white rounded-2xl p-3.5 shadow-sm cursor-pointer hover:shadow-md transition-shadow flex gap-3" data-article-key="${esc(a.key)}">
+    ${image ? `<img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="w-16 h-16 object-contain shrink-0">`
+            : '<div class="w-16 h-16 shrink-0 rounded-xl bg-gray-50 flex items-center justify-center text-2xl">📦</div>'}
+    <div class="min-w-0 flex-1">
+      ${a.brand ? `<div class="text-[10px] uppercase tracking-wide text-gray-400 truncate">${esc(a.brand)}</div>` : ''}
+      <div class="font-semibold text-gray-800 leading-tight line-clamp-2">${esc(a.name || a.key)}</div>
+      <div class="flex flex-wrap gap-1 mt-1.5">${articleBadges(a)}</div>
+      <div class="flex items-baseline justify-between gap-2 mt-1.5">
+        ${price ? `<span class="text-sm font-bold text-[#003882]" title="${price.label}">${fmt(price.value)}${unit}</span>` : '<span></span>'}
+        <span class="text-[11px] text-gray-400 text-right">${when}</span>
+      </div>
+    </div>
+  </div>`;
 }
 
 document.getElementById('productGrid').addEventListener('click', event => {
-  const card = event.target.closest('[data-product-id]');
-  if (card) showProductDetail(card.dataset.productId);
+  const card = event.target.closest('[data-article-key]');
+  if (card) openArticle(card.dataset.articleKey);
 });
 
-// ── Produkt-Detail Modal ──────────────────────────────────────────────────────
-function showProductDetail(id) {
-  const p = allProducts.find(x => x.id === id);
-  if (!p) return;
+// ── Artikel-Dialog ────────────────────────────────────────────────────────────
+async function openArticle(key) {
+  if (!key) return;
+  const request = ++articleDialogRequest;
+  const product = key.startsWith('nr:') ? allProducts.find(p => `nr:${p.id}` === key) : null;
+  // Bought articles are shown right away, their details follow
+  renderArticle(product
+    ? {...productAsArticle(product), product, loading: true}
+    : {key, name: 'Lade Artikel…', sources: [], loading: true});
+  document.getElementById('productModal').classList.add('open');
+  try {
+    const article = await wsCall('lidl_plus/article', {key});
+    if (request === articleDialogRequest) renderArticle(article);
+  } catch (err) {
+    if (request !== articleDialogRequest) return;
+    document.getElementById('articleDetails').innerHTML =
+      `<p class="text-red-600 py-4">${esc('Der Artikel konnte nicht geladen werden: ' + err.message)}</p>`;
+  }
+}
 
+// A new article added by hand, e.g. with the values of Open Food Facts (prefill.sources: field -> database)
+function newArticle(prefill = {}) {
+  articleDialogRequest++;
+  renderArticle({
+    key: null, name: prefill.name || '', brand: prefill.brand || '', sources: ['own'], barcodes: prefill.barcodes || [],
+    package_size: prefill.package_size || '', nutrition: prefill.nutrition || {}, nutrition_basis: prefill.nutrition_basis || '100g',
+    ingredients: prefill.ingredients || '', notes: '', images: [], image: prefill.image || '',
+  });
+  pendingSources = {...(prefill.sources || {})};
+  pendingImage = prefill.image || '';
+  if (prefill.source) {
+    document.getElementById('articleFormStatus').textContent = `Angaben von ${prefill.source} – bitte prüfen und speichern.`;
+  }
+  document.getElementById('productModal').classList.add('open');
+}
+
+function renderArticle(a) {
+  currentArticle = a;
+  editBarcodes = [...(a.barcodes || [])];
+  pendingSources = {};
+  pendingImage = '';
+  document.getElementById('modalTitle').textContent = a.key ? (a.name || a.key) : 'Neuer Artikel';
+  document.getElementById('modalBrand').textContent = a.brand || '';
+  document.getElementById('articleHead').innerHTML = a.loading && !a.product ? '' : renderArticleHead(a);
+  renderPurchases(a.product);
+  document.getElementById('articleDetails').innerHTML = a.loading
+    ? '<p class="text-center py-6 text-gray-400">Lade Details…</p>'
+    : renderArticleForm(a) + renderArticlePhotos(a);
+  if (!a.loading) renderBarcodeChips();
+}
+
+function renderArticleHead(a) {
+  const front = (a.images || []).find(img => img.kind === 'front');
+  const image = (front && imageUrl(front.url)) || safeUrl(a.image);
+  const facts = [];
+  if ((a.receipt_names || []).length) facts.push(`Auf dem Kassenbon: ${esc(a.receipt_names.join(', '))}`);
+  if ((a.article_numbers || []).length) facts.push(`Artikelnummer: ${esc(a.article_numbers.join(', '))}`);
+  if (a.packaging) facts.push(`Packung laut Angebot: ${esc(a.packaging)}`);
+  if (a.price_per_unit) facts.push(`Grundpreis: ${esc(a.price_per_unit)}`);
+  if (a.category) facts.push(`Kategorie: ${esc(a.category.replace(/^Kategorien\//, '').split('/').join(' › '))}`);
+  const offers = (a.offers || []).map(o => `
+    <div class="flex items-center gap-2 py-1.5 border-b border-gray-50 last:border-0 text-sm">
+      <span class="flex-1 min-w-0 truncate">${esc(o.title)}${o.packaging ? ` <span class="text-xs text-gray-400">${esc(o.packaging)}</span>` : ''}</span>
+      <span class="font-semibold text-[#003882] shrink-0">${o.price != null ? fmt(o.price) : esc(o.price_text)}</span>
+      ${o.discount ? `<span class="badge bg-red-100 text-red-600 shrink-0">${esc(o.discount)}</span>` : ''}
+      <span class="shrink-0">${o.status === 'expired' ? `<span class="badge bg-gray-100 text-gray-500">bis ${fmtDate(o.end)}</span>` : validity(o)}</span>
+    </div>`).join('');
+  const leaflets = (a.leaflets || []).map(l => `
+    <button type="button" class="w-full flex items-center gap-2 py-1.5 border-b border-gray-50 last:border-0 text-sm text-left hover:bg-gray-50" data-leaflet-id="${esc(l.id)}">
+      <span class="flex-1 min-w-0 truncate">${esc([l.name, l.title].filter(Boolean).join(' · '))}</span>
+      ${(l.pages || []).length ? `<span class="text-xs text-gray-400 shrink-0">S. ${l.pages.map(esc).join(', ')}</span>` : ''}
+      ${l.price != null ? `<span class="font-semibold text-[#003882] shrink-0">${fmt(l.price)}</span>` : ''}
+    </button>`).join('');
+  const url = safeUrl(a.url);
+  return `<div class="flex gap-4 mb-4">
+      ${image ? `<img src="${esc(image)}" alt="" referrerpolicy="no-referrer" class="w-24 h-24 object-contain shrink-0 rounded-xl bg-gray-50">` : ''}
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap gap-1 mb-2">${articleBadges(a)}</div>
+        ${facts.map(fact => `<div class="text-xs text-gray-500">${fact}</div>`).join('')}
+        ${url ? `<a class="btn mt-2" href="${esc(url)}" ${EXTERNAL}>🌐 Im Lidl-Onlineshop</a>` : ''}
+      </div>
+    </div>
+    ${a.description ? `<p class="text-xs text-gray-600 mb-4 whitespace-pre-line line-clamp-6">${esc(a.description)}</p>` : ''}
+    ${offers ? `<h3 class="section-title">🏷️ Angebote</h3><div class="mb-4">${offers}</div>` : ''}
+    ${leaflets ? `<h3 class="section-title">📰 In Prospekten</h3><div class="mb-4">${leaflets}</div>` : ''}`;
+}
+
+// A leaflet of the article opens the leaflet dialog, which lies below this one
+document.getElementById('articleHead').addEventListener('click', event => {
+  const leaflet = event.target.closest('[data-leaflet-id]');
+  if (!leaflet) return;
+  closeProductModal();
+  openLeaflet(leaflet.dataset.leafletId);
+});
+
+// Purchases of a bought article: statistics, price chart and history
+function renderPurchases(p) {
   if (chartModal) { chartModal.destroy(); chartModal = null; }
+  document.getElementById('articlePurchases').classList.toggle('hidden', !p);
+  if (!p) return;
 
   const trend = getPriceTrend(p);
   const trendLabel = trend==='up' ? ' ↑ teurer' : trend==='down' ? ' ↓ günstiger' : '';
   const trendColor = trend==='up' ? 'text-red-500' : trend==='down' ? 'text-green-500' : 'text-gray-500';
   const unit = p.unit ? '/' + esc(p.unit) : '';
-
-  document.getElementById('modalTitle').textContent = p.name || p.id;
 
   document.getElementById('modalStats').innerHTML = [
     {label:'Käufe gesamt',    val:p.purchase_count+'×'},
@@ -999,13 +1244,580 @@ function showProductDetail(id) {
           <span class="font-semibold text-gray-800 shrink-0">${fmt(h.price)}${unit}</span>
         </div>`).join('')
     : '<p class="text-center py-4 text-gray-400 text-sm">Keine Preishistorie verfügbar</p>';
+}
 
-  document.getElementById('productModal').classList.add('open');
+// Name, brand, barcodes, package size, nutrition values, ingredients and notes
+function renderArticleForm(a) {
+  const own = !a.key || (a.sources || []).includes('own');
+  const nutrition = a.nutrition || {};
+  const source = field => (a.sources_of_details || {})[field]
+    ? `<span class="text-[10px] text-gray-400">(Quelle: ${esc(a.sources_of_details[field])})</span>` : '';
+  // Name and brand of Lidl are the placeholders, only a changed name is shown in the field
+  const name = own ? a.name : (a.name !== a.lidl_name ? a.name : '');
+  const brand = own ? a.brand : (a.brand !== a.lidl_brand ? a.brand : '');
+  return `<h3 class="section-title mt-5">✏️ Deine Angaben</h3>
+  <form id="articleForm" class="space-y-3" onsubmit="saveArticle(event)">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <label class="block"><span class="text-xs text-gray-500">${own ? 'Name *' : 'Eigener Name (statt dem von Lidl)'}</span>
+        <input name="name" maxlength="200" value="${esc(name)}" placeholder="${esc(own ? 'z. B. Duschgel Sensitive' : a.lidl_name || '')}" class="${INPUT}"></label>
+      <label class="block"><span class="text-xs text-gray-500">Marke</span>
+        <input name="brand" maxlength="100" value="${esc(brand)}" placeholder="${esc(own ? '' : a.lidl_brand || '')}" class="${INPUT}"></label>
+      <label class="block"><span class="text-xs text-gray-500">Packungsgröße ${source('package_size')}</span>
+        <input name="package_size" maxlength="100" value="${esc(a.package_size)}" placeholder="${esc(a.packaging || 'z. B. 500 g')}" class="${INPUT}"></label>
+      <div><span class="text-xs text-gray-500">Barcodes (EAN)</span>
+        <div id="barcodeChips" class="flex flex-wrap gap-1.5 my-1"></div>
+        <div class="flex gap-1.5">
+          <input id="barcodeInput" inputmode="numeric" autocomplete="off" placeholder="Barcode eingeben" class="${INPUT} !py-1.5">
+          <button type="button" class="btn" onclick="addBarcodeFromInput()" title="Barcode hinzufügen" aria-label="Barcode hinzufügen">＋</button>
+          <button type="button" class="btn" onclick="openScanner(true)" title="Barcode scannen" aria-label="Barcode scannen">📷</button>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="text-xs text-gray-500">Nährwerte ${source('nutrition')}</span>
+        <select name="nutrition_basis" class="border border-gray-200 rounded-xl px-2 py-1 bg-white text-xs">
+          <option value="100g"${a.nutrition_basis === '100ml' ? '' : ' selected'}>pro 100 g</option>
+          <option value="100ml"${a.nutrition_basis === '100ml' ? ' selected' : ''}>pro 100 ml</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1.5">${NUTRIENTS.map(([key, label, unit]) => `
+        <label class="flex flex-col justify-between"><span class="text-[11px] text-gray-500">${label} (${unit})</span>
+          <input name="n_${key}" inputmode="decimal" autocomplete="off" value="${esc(decimalText(nutrition[key]))}" class="${INPUT} !py-1.5"></label>`).join('')}
+      </div>
+    </div>
+    <label class="block"><span class="text-xs text-gray-500">Zutaten / Inhaltsstoffe – auch bei Non-Food, z. B. Kosmetik oder Reiniger ${source('ingredients')}</span>
+      <textarea name="ingredients" rows="4" maxlength="10000" class="${INPUT}">${esc(a.ingredients)}</textarea></label>
+    <label class="block"><span class="text-xs text-gray-500">Notizen</span>
+      <textarea name="notes" rows="2" maxlength="10000" class="${INPUT}">${esc(a.notes)}</textarea></label>
+    <div class="flex flex-wrap gap-2 items-center">
+      <button type="submit" class="btn btn-primary !text-sm !px-4 !py-2">Speichern</button>
+      <button type="button" class="btn !text-sm !py-2" onclick="lookupForArticle()">🔎 Open Food Facts</button>
+      ${a.key && (a.has_details || own) ? `<button type="button" class="btn !text-sm !py-2 !text-red-600" id="articleDelete">${own ? '🗑️ Artikel löschen' : '🗑️ Angaben löschen'}</button>` : ''}
+      <span id="articleFormStatus" class="text-xs text-gray-500"></span>
+    </div>
+  </form>`;
+}
+
+function renderBarcodeChips() {
+  const box = document.getElementById('barcodeChips');
+  if (!box) return;
+  box.innerHTML = editBarcodes.length
+    ? editBarcodes.map(code => `<span class="badge bg-gray-100 text-gray-700 font-mono">${esc(code)}
+        <button type="button" class="ml-1 text-red-600" data-remove-barcode="${esc(code)}" aria-label="Barcode entfernen">✕</button></span>`).join('')
+    : '<span class="text-xs text-gray-400">Noch kein Barcode</span>';
+}
+
+function addBarcodeFromInput() {
+  const input = document.getElementById('barcodeInput');
+  if (addBarcode(input.value)) input.value = '';
+}
+
+// Adds a barcode to the article of the dialog, it is saved with the article
+function addBarcode(text) {
+  const status = document.getElementById('articleFormStatus');
+  const code = String(text ?? '').replace(/[\s-]/g, '');
+  if (!/^\d{8,14}$/.test(code)) {
+    if (status) status.textContent = '⚠️ Ein Barcode (EAN) hat 8 bis 14 Ziffern.';
+    return false;
+  }
+  if (!editBarcodes.includes(code)) editBarcodes.push(code);
+  renderBarcodeChips();
+  if (status) status.textContent = 'Barcode hinzugefügt – Speichern nicht vergessen.';
+  return true;
+}
+
+async function saveArticle(event) {
+  if (event) event.preventDefault();
+  const form = document.getElementById('articleForm');
+  const status = document.getElementById('articleFormStatus');
+  const a = currentArticle;
+  // A typed barcode counts even without a click on +
+  const typed = document.getElementById('barcodeInput');
+  if (typed.value.trim() && !addBarcode(typed.value)) return;
+  typed.value = '';
+  const nutrition = {};
+  for (const [key, label, unit] of NUTRIENTS) {
+    const value = parseDecimal(form.elements[`n_${key}`].value);
+    if (Number.isNaN(value)) {
+      status.textContent = `⚠️ ${label} (${unit}): bitte eine Zahl eingeben, z. B. 12,5`;
+      return;
+    }
+    nutrition[key] = value;
+  }
+  const fields = {
+    name: form.elements.name.value.trim(),
+    brand: form.elements.brand.value.trim(),
+    package_size: form.elements.package_size.value.trim(),
+    ingredients: form.elements.ingredients.value.trim(),
+    notes: form.elements.notes.value.trim(),
+    nutrition,
+    nutrition_basis: form.elements.nutrition_basis.value,
+    barcodes: editBarcodes,
+  };
+  if (pendingImage) fields.image = pendingImage;
+  if (Object.keys(pendingSources).length) fields.sources = pendingSources;
+  if (a.key) {
+    fields.key = a.key;
+  } else if (!fields.name) {
+    status.textContent = '⚠️ Ein neuer Artikel braucht einen Namen.';
+    return;
+  }
+  status.textContent = 'Speichere…';
+  try {
+    const saved = await wsCall('lidl_plus/article_save', fields);
+    renderArticle(saved);
+    document.getElementById('articleFormStatus').textContent = '✓ Gespeichert';
+    if (articlesFromServer) loadArticles();
+  } catch (err) {
+    status.textContent = '⚠️ ' + err.message;
+  }
+}
+
+// Values of Open Food Facts for the barcode of the article, only empty fields are filled
+async function lookupForArticle() {
+  const status = document.getElementById('articleFormStatus');
+  const code = editBarcodes[0] || document.getElementById('barcodeInput').value.replace(/[\s-]/g, '');
+  if (!code) {
+    status.textContent = 'Erst einen Barcode eingeben oder scannen.';
+    return;
+  }
+  status.textContent = 'Frage Open Food Facts…';
+  try {
+    const result = await wsCall('lidl_plus/barcode', {code, lookup: true});
+    if (!result.product) {
+      status.textContent = result.lookup_error
+        ? `Open Food Facts ist nicht erreichbar: ${result.lookup_error}`
+        : 'Open Food Facts kennt diesen Barcode nicht.';
+      return;
+    }
+    const taken = applyProduct(result.product);
+    status.textContent = taken.length
+      ? `Von ${result.product.source} übernommen: ${taken.join(', ')} – bitte prüfen und speichern.`
+      : `${result.product.source} hat keine Angaben für die leeren Felder.`;
+  } catch (err) {
+    status.textContent = '⚠️ ' + err.message;
+  }
+}
+
+// Fills the empty fields of the form with the values of a product of Open Food Facts, returns what was filled
+function applyProduct(product) {
+  const form = document.getElementById('articleForm');
+  const taken = [];
+  const fill = (name, value, label, source) => {
+    if (!value || form.elements[name].value.trim()) return;
+    form.elements[name].value = value;
+    taken.push(label);
+    pendingSources[source] = product.source;
+  };
+  if (!currentArticle.key || (currentArticle.sources || []).includes('own')) {
+    fill('name', product.name, 'Name', 'name');
+    fill('brand', product.brand, 'Marke', 'brand');
+  }
+  fill('package_size', product.quantity, 'Packungsgröße', 'package_size');
+  fill('ingredients', product.ingredients, 'Zutaten', 'ingredients');
+  const nutrition = product.nutrition || {};
+  const empty = NUTRIENTS.every(([key]) => !form.elements[`n_${key}`].value.trim());
+  if (Object.keys(nutrition).length && empty) {
+    NUTRIENTS.forEach(([key]) => { form.elements[`n_${key}`].value = decimalText(nutrition[key]); });
+    form.elements.nutrition_basis.value = product.nutrition_basis === '100ml' ? '100ml' : '100g';
+    taken.push('Nährwerte');
+    pendingSources.nutrition = product.source;
+  }
+  if (safeUrl(product.image) && !currentArticle.image) {
+    pendingImage = product.image;
+    pendingSources.image = product.source;
+  }
+  return taken;
+}
+
+// A second click within 4 seconds confirms, the Home Assistant app shows no confirm() dialogs
+function armed(button, question) {
+  if (button.dataset.armed) return true;
+  const original = button.innerHTML;
+  button.dataset.armed = '1';
+  button.textContent = question;
+  setTimeout(() => {
+    if (!button.isConnected || !button.dataset.armed) return;
+    delete button.dataset.armed;
+    button.innerHTML = original;
+  }, 4000);
+  return false;
+}
+
+document.getElementById('articleDetails').addEventListener('click', async event => {
+  const remove = event.target.closest('[data-remove-barcode]');
+  if (remove) {
+    editBarcodes = editBarcodes.filter(code => code !== remove.dataset.removeBarcode);
+    renderBarcodeChips();
+    document.getElementById('articleFormStatus').textContent = 'Barcode entfernt – Speichern nicht vergessen.';
+    return;
+  }
+  const photo = event.target.closest('[data-delete-image]');
+  if (photo) {
+    if (!armed(photo, 'Löschen?')) return;
+    const status = document.getElementById('photoStatus');
+    try {
+      const saved = await wsCall('lidl_plus/article_image_delete', {key: currentArticle.key, image_id: photo.dataset.deleteImage});
+      if (saved) renderArticle(saved);
+    } catch (err) {
+      status.textContent = '⚠️ ' + err.message;
+    }
+    return;
+  }
+  const removeArticle = event.target.closest('#articleDelete');
+  if (removeArticle) {
+    if (!armed(removeArticle, 'Wirklich löschen?')) return;
+    const status = document.getElementById('articleFormStatus');
+    try {
+      const result = await wsCall('lidl_plus/article_delete', {key: currentArticle.key});
+      if (result) {
+        renderArticle(result);
+        document.getElementById('articleFormStatus').textContent = '✓ Deine Angaben wurden gelöscht';
+      } else {
+        closeProductModal();
+      }
+      if (articlesFromServer) loadArticles();
+    } catch (err) {
+      status.textContent = '⚠️ ' + err.message;
+    }
+  }
+});
+
+document.getElementById('articleDetails').addEventListener('keydown', event => {
+  // Enter in the barcode field adds the barcode instead of saving
+  if (event.key === 'Enter' && event.target.id === 'barcodeInput') {
+    event.preventDefault();
+    addBarcodeFromInput();
+  }
+});
+
+document.getElementById('articleDetails').addEventListener('change', event => {
+  if (event.target.matches('[data-photo-input]')) uploadPhoto(event.target);
+});
+
+// ── Fotos ─────────────────────────────────────────────────────────────────────
+function renderArticlePhotos(a) {
+  if (!a.key) return '<p class="text-xs text-gray-400 mt-5">Fotos kannst du hinzufügen, sobald der Artikel gespeichert ist.</p>';
+  const photos = (a.images || []).map(img => {
+    const url = imageUrl(img.url), kind = IMAGE_KINDS[img.kind] || 'Foto';
+    return `<div class="relative">
+      ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="${esc(kind)}" loading="lazy"
+        class="w-full h-24 object-cover rounded-lg border border-gray-100 bg-gray-50"></a>` : ''}
+      <div class="text-[10px] text-gray-500 text-center mt-0.5">${esc(kind)}</div>
+      <button type="button" class="absolute top-1 right-1 bg-white/90 rounded-full px-1.5 text-xs text-red-600 shadow"
+        data-delete-image="${esc(img.id)}" aria-label="Foto löschen">✕</button>
+    </div>`;
+  }).join('');
+  return `<h3 class="section-title mt-6">📷 Fotos</h3>
+    ${photos ? `<div class="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-2">${photos}</div>`
+             : '<p class="text-xs text-gray-400 mb-2">Noch keine Fotos, z. B. von der Nährwerttabelle oder der Zutatenliste.</p>'}
+    <div class="flex flex-wrap gap-2 items-center">
+      <select id="photoKind" class="border border-gray-200 rounded-xl px-2 py-1.5 bg-white text-xs" aria-label="Was zeigt das Foto?">
+        ${Object.entries(IMAGE_KINDS).map(([kind, label]) => `<option value="${kind}">${label}</option>`).join('')}
+      </select>
+      <label class="btn !text-sm !py-2 cursor-pointer">📷 Foto aufnehmen<input type="file" accept="image/*" capture="environment" class="hidden" data-photo-input></label>
+      <label class="btn !text-sm !py-2 cursor-pointer">🖼️ Aus der Galerie<input type="file" accept="image/*" class="hidden" data-photo-input></label>
+      <span id="photoStatus" class="text-xs text-gray-500"></span>
+    </div>`;
+}
+
+// Photos of phones have many megapixels, 1600 pixels are enough to read a nutrition label
+async function shrinkPhoto(file, maxSize = 1600) {
+  const image = await new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Das Foto konnte nicht gelesen werden')); };
+    img.src = url;
+  });
+  const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(image.naturalWidth * scale);
+  canvas.height = Math.round(image.naturalHeight * scale);
+  canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+  return dataUrl.slice(dataUrl.indexOf(',') + 1);
+}
+
+async function uploadPhoto(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file || !currentArticle || !currentArticle.key) return;
+  const status = document.getElementById('photoStatus');
+  const kind = document.getElementById('photoKind').value;
+  status.textContent = 'Lade das Foto hoch…';
+  try {
+    const data = await shrinkPhoto(file);
+    const saved = await wsCall('lidl_plus/article_image', {key: currentArticle.key, kind, data});
+    renderArticle(saved);
+    document.getElementById('photoStatus').textContent = '✓ Foto gespeichert';
+  } catch (err) {
+    const current = document.getElementById('photoStatus');
+    if (current) current.textContent = '⚠️ ' + err.message;
+  }
 }
 
 function closeProductModal() {
+  articleDialogRequest++;
   document.getElementById('productModal').classList.remove('open');
   if (chartModal) { chartModal.destroy(); chartModal = null; }
+}
+
+// ── Barcode scannen ───────────────────────────────────────────────────────────
+// The scanner of the Home Assistant app waits for the user, a scan may take a while
+const SCAN_TIMEOUT_MS = 10 * 60 * 1000;
+// forArticle: the barcode is added to the article of the dialog instead of being looked up
+let scanForArticle = false, scanRequest = 0, lastScan = null, cameraStream = null, cameraTimer = null;
+
+async function openScanner(forArticle = false) {
+  scanForArticle = forArticle;
+  const request = ++scanRequest;
+  lastScan = null;
+  document.getElementById('scanResult').innerHTML = '';
+  document.getElementById('scanInput').value = '';
+  document.getElementById('scanHint').textContent = '';
+  document.getElementById('scanModal').classList.add('open');
+  // 1. The barcode scanner of the Home Assistant app
+  let result;
+  try {
+    result = await postCall({type: 'lidl-plus:scan'}, SCAN_TIMEOUT_MS);
+  } catch (err) {
+    result = {unsupported: true};
+  }
+  if (request !== scanRequest) return;
+  if (result && result.code) return handleBarcode(result.code);
+  if (result && result.cancelled && result.reason !== 'alternative_options') {
+    closeScanModal();
+    return;
+  }
+  // 2. The camera in the browser, 3. typing the digits below the bars
+  if (result && result.unsupported) startCamera(request);
+  document.getElementById('scanInput').focus();
+}
+
+async function startCamera(request) {
+  const hint = document.getElementById('scanHint');
+  if (!('BarcodeDetector' in window) || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+    hint.textContent = 'Dieser Browser kann keine Barcodes lesen: tippe die Ziffern unter dem Strichcode ein. In der Home-Assistant-App öffnet sich der Scanner.';
+    return;
+  }
+  try {
+    const supported = await window.BarcodeDetector.getSupportedFormats();
+    const formats = ['ean_13', 'ean_8', 'upc_a', 'upc_e'].filter(format => supported.includes(format));
+    if (!formats.length) throw new Error('keine Strichcodes');
+    const detector = new window.BarcodeDetector({formats});
+    const stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'environment'}, audio: false});
+    if (request !== scanRequest) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
+    cameraStream = stream;
+    const video = document.getElementById('scanVideo');
+    video.srcObject = stream;
+    await video.play();
+    document.getElementById('scanCamera').classList.remove('hidden');
+    const detect = async () => {
+      if (!cameraStream || request !== scanRequest) return;
+      try {
+        const codes = await detector.detect(video);
+        if (codes.length) return handleBarcode(codes[0].rawValue);
+      } catch (err) {
+        // the next picture may work
+      }
+      cameraTimer = setTimeout(detect, 250);
+    };
+    detect();
+  } catch (err) {
+    stopCamera();
+    hint.textContent = `Die Kamera ist nicht verfügbar (${err.message}): tippe die Ziffern unter dem Strichcode ein.`;
+  }
+}
+
+function stopCamera() {
+  clearTimeout(cameraTimer);
+  if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+  cameraStream = null;
+  document.getElementById('scanCamera').classList.add('hidden');
+}
+
+function closeScanModal() {
+  scanRequest++;
+  stopCamera();
+  document.getElementById('scanModal').classList.remove('open');
+}
+
+function submitBarcode(event) {
+  event.preventDefault();
+  const code = document.getElementById('scanInput').value;
+  if (code.trim()) handleBarcode(code);
+}
+
+async function handleBarcode(text) {
+  stopCamera();
+  const code = String(text ?? '').replace(/[\s-]/g, '');
+  document.getElementById('scanInput').value = code;
+  if (scanForArticle) {
+    closeScanModal();
+    addBarcode(code);
+    return;
+  }
+  const box = document.getElementById('scanResult');
+  box.innerHTML = '<p class="text-gray-400">Suche den Barcode…</p>';
+  const request = ++scanRequest;
+  try {
+    const result = await wsCall('lidl_plus/barcode', {code});
+    if (request !== scanRequest) return;
+    lastScan = result;
+    if (result.articles.length === 1) {
+      closeScanModal();
+      openArticle(result.articles[0].key);
+      return;
+    }
+    box.innerHTML = renderScanResult(result);
+    if (!result.articles.length && result.product && result.product.name) {
+      // A broad search: names of Open Food Facts are longer than the ones of Lidl
+      const word = result.product.name.split(/[\s,]+/).find(part => part.length > 3) || result.product.name;
+      document.getElementById('linkSearch').value = word;
+      searchLinkCandidates();
+    }
+  } catch (err) {
+    if (request === scanRequest) box.innerHTML = `<p class="text-red-600">${esc(err.message)}</p>`;
+  }
+}
+
+function renderScanResult(result) {
+  const product = result.product;
+  if (result.articles.length > 1) {
+    return `<h3 class="section-title">Mehrere Artikel haben diesen Barcode</h3>${result.articles.map(renderLinkRow).join('')}`;
+  }
+  return `<p class="text-sm text-gray-700 mb-3">Der Barcode <strong class="font-mono">${esc(result.code)}</strong> gehört noch zu keinem Artikel.</p>
+    ${product ? renderScannedProduct(product) : `<p class="text-xs text-gray-500 mb-3">${esc(result.lookup_error
+      ? 'Open Food Facts ist nicht erreichbar: ' + result.lookup_error
+      : 'Auch Open Food Facts kennt ihn nicht – die Angaben kannst du selbst eintragen.')}</p>`}
+    <button type="button" class="btn btn-primary !text-sm !px-4 !py-2" onclick="createFromScan()">＋ Als neuen Artikel anlegen</button>
+    <h3 class="section-title mt-5">Oder einem vorhandenen Artikel zuordnen</h3>
+    <form class="flex gap-2" onsubmit="searchLinkCandidates(event)">
+      <input type="search" id="linkSearch" placeholder="Artikel suchen, z. B. Skyr" class="${INPUT}">
+      <button type="submit" class="btn">Suchen</button>
+    </form>
+    <div id="linkResults" class="mt-2"></div>`;
+}
+
+function renderScannedProduct(p) {
+  const image = safeUrl(p.image), n = p.nutrition || {};
+  const facts = [
+    p.quantity,
+    n.energy_kcal != null ? `${decimalText(n.energy_kcal)} kcal pro ${p.nutrition_basis === '100ml' ? '100 ml' : '100 g'}` : '',
+    p.nutriscore ? `Nutri-Score ${p.nutriscore.toUpperCase()}` : '',
+    p.ingredients ? 'mit Zutaten' : '',
+  ].filter(Boolean);
+  const url = safeUrl(p.url);
+  return `<div class="flex gap-3 bg-gray-50 rounded-xl p-3 mb-3">
+    ${image ? `<img src="${esc(image)}" alt="" referrerpolicy="no-referrer" class="w-16 h-16 object-contain shrink-0">` : ''}
+    <div class="min-w-0">
+      ${p.brand ? `<div class="text-[10px] uppercase tracking-wide text-gray-400">${esc(p.brand)}</div>` : ''}
+      <div class="font-semibold text-gray-800">${esc(p.name || 'Ohne Namen')}</div>
+      <div class="text-xs text-gray-500">${facts.map(esc).join(' · ')}</div>
+      <div class="text-[11px] text-gray-400 mt-1">Gefunden bei ${esc(p.source)}${url ? ` · <a class="underline" href="${esc(url)}" ${EXTERNAL}>ansehen</a>` : ''}</div>
+    </div>
+  </div>`;
+}
+
+function renderLinkRow(a) {
+  return `<button type="button" class="w-full text-left flex items-center gap-2 py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50" data-link-key="${esc(a.key)}">
+    <span class="flex-1 min-w-0"><span class="block truncate font-medium text-gray-800">${esc(a.name || a.key)}</span>
+      <span class="block text-[11px] text-gray-400 truncate">${esc([a.brand, ...(a.receipt_names || [])].filter(Boolean).join(' · '))}</span></span>
+    ${a.purchase_count ? `<span class="badge bg-blue-50 text-[#003882] shrink-0">🧾 ${esc(a.purchase_count)}×</span>` : ''}
+  </button>`;
+}
+
+async function searchLinkCandidates(event) {
+  if (event) event.preventDefault();
+  const query = document.getElementById('linkSearch').value.trim();
+  const box = document.getElementById('linkResults');
+  if (!query) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = '<p class="text-xs text-gray-400">Suche…</p>';
+  try {
+    const result = await wsCall('lidl_plus/articles', {query, limit: 15});
+    box.innerHTML = (result.articles || []).length
+      ? result.articles.map(renderLinkRow).join('')
+      : '<p class="text-xs text-gray-400">Kein Artikel gefunden – versuche ein anderes Wort.</p>';
+  } catch (err) {
+    box.innerHTML = `<p class="text-xs text-red-600">${esc(err.message)}</p>`;
+  }
+}
+
+document.getElementById('scanResult').addEventListener('click', event => {
+  const row = event.target.closest('[data-link-key]');
+  if (!row) return;
+  // Several articles with the barcode: open the chosen one, otherwise the barcode is added to it
+  if (lastScan && lastScan.articles.length > 1) {
+    closeScanModal();
+    openArticle(row.dataset.linkKey);
+  } else {
+    linkScan(row.dataset.linkKey);
+  }
+});
+
+// A new article with the barcode and the values of Open Food Facts, saved after checking them
+function createFromScan() {
+  const scan = lastScan;
+  if (!scan) return;
+  closeScanModal();
+  const p = scan.product;
+  if (!p) {
+    newArticle({barcodes: [scan.code]});
+    return;
+  }
+  const sources = {};
+  for (const [field, value] of [['name', p.name], ['brand', p.brand], ['package_size', p.quantity],
+    ['ingredients', p.ingredients], ['image', safeUrl(p.image)]]) {
+    if (value) sources[field] = p.source;
+  }
+  if (Object.keys(p.nutrition || {}).length) sources.nutrition = p.source;
+  newArticle({
+    name: p.name, brand: p.brand, barcodes: [scan.code], package_size: p.quantity, nutrition: p.nutrition,
+    nutrition_basis: p.nutrition_basis, ingredients: p.ingredients, image: safeUrl(p.image), source: p.source, sources,
+  });
+}
+
+// The scanned barcode belongs to an article: saved with the values of Open Food Facts for its empty fields
+async function linkScan(key) {
+  const scan = lastScan;
+  const box = document.getElementById('linkResults');
+  box.innerHTML = '<p class="text-xs text-gray-400">Speichere…</p>';
+  try {
+    const article = await wsCall('lidl_plus/article', {key});
+    const fields = {key, barcodes: [...(article.barcodes || []), scan.code]};
+    const p = scan.product, sources = {}, taken = [];
+    if (p) {
+      if (!article.package_size && p.quantity) { fields.package_size = p.quantity; sources.package_size = p.source; taken.push('Packungsgröße'); }
+      if (!article.has_nutrition && Object.keys(p.nutrition || {}).length) {
+        fields.nutrition = p.nutrition;
+        fields.nutrition_basis = p.nutrition_basis === '100ml' ? '100ml' : '100g';
+        sources.nutrition = p.source;
+        taken.push('Nährwerte');
+      }
+      if (!article.ingredients && p.ingredients) { fields.ingredients = p.ingredients; sources.ingredients = p.source; taken.push('Zutaten'); }
+      if (!article.image && safeUrl(p.image)) { fields.image = safeUrl(p.image); sources.image = p.source; }
+      if (Object.keys(sources).length) fields.sources = sources;
+    }
+    const saved = await wsCall('lidl_plus/article_save', fields);
+    closeScanModal();
+    articleDialogRequest++;
+    renderArticle(saved);
+    document.getElementById('productModal').classList.add('open');
+    document.getElementById('articleFormStatus').textContent = taken.length
+      ? `✓ Barcode zugeordnet, von ${p.source} übernommen: ${taken.join(', ')}`
+      : '✓ Barcode zugeordnet';
+    if (articlesFromServer) loadArticles();
+  } catch (err) {
+    box.innerHTML = `<p class="text-xs text-red-600">${esc(err.message)}</p>`;
+  }
 }
 
 function closeLeafletModal() {
@@ -1017,12 +1829,16 @@ function closeLeafletModal() {
 function closeModal(e) {
   if (e.target.id === 'productModal') closeProductModal();
   else if (e.target.id === 'leafletModal') closeLeafletModal();
+  else if (e.target.id === 'scanModal') closeScanModal();
 }
 
+// Escape closes the dialog on top
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  closeProductModal();
-  closeLeafletModal();
+  const open = id => document.getElementById(id).classList.contains('open');
+  if (open('scanModal')) closeScanModal();
+  else if (open('productModal')) closeProductModal();
+  else closeLeafletModal();
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1068,7 +1884,8 @@ function renderOfferCard(o) {
   const image = safeUrl(o.image);
   const bought = (o.bought_products || []).map(p => p.name).filter(Boolean);
   const unitInfo = [o.packaging, o.price_per_unit].filter(Boolean).map(esc).join(' · ');
-  return `<div class="bg-white rounded-2xl shadow-sm overflow-hidden flex flex-col" data-offer-id="${esc(o.id)}">
+  return `<div class="bg-white rounded-2xl shadow-sm overflow-hidden flex flex-col cursor-pointer hover:shadow-md transition-shadow"
+    data-offer-id="${esc(o.id)}" data-article-key="${esc(o.article_key || '')}">
     ${image ? `<div class="h-32 flex items-center justify-center p-2 bg-white">
       <img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="max-h-full max-w-full object-contain"></div>` : ''}
     <div class="p-3.5 pt-2 flex-1 flex flex-col">
@@ -1085,6 +1902,11 @@ function renderOfferCard(o) {
     </div>
   </div>`;
 }
+
+document.getElementById('offerGrid').addEventListener('click', event => {
+  const card = event.target.closest('[data-article-key]');
+  if (card && card.dataset.articleKey) openArticle(card.dataset.articleKey);
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // PROSPEKTE UND SUCHE
@@ -1148,7 +1970,7 @@ async function openLeaflet(id) {
 }
 
 function renderLeafletDetails(l) {
-  const pages = l.pages || [], products = l.products || [];
+  const pages = l.pages || [], products = l.products || [], offers = l.offers || [];
   const pdf = safeUrl(l.pdf), url = safeUrl(l.url);
   return `
     <div class="flex flex-wrap items-center gap-2 mb-4">
@@ -1156,7 +1978,11 @@ function renderLeafletDetails(l) {
       ${pdf ? `<a class="btn" href="${esc(pdf)}" ${EXTERNAL}>📄 PDF</a>` : ''}
       ${url ? `<a class="btn" href="${esc(url)}" ${EXTERNAL}>🌐 Online ansehen</a>` : ''}
     </div>
-    ${products.length ? `<h3 class="section-title">Produkte (${products.length})</h3>
+    ${offers.length ? `<h3 class="section-title">Angebote der Lidl Plus App in diesem Prospekt (${offers.length})</h3>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-5">${offers.map(renderLeafletOffer).join('')}</div>` : ''}
+    ${!offers.length && !products.length ? `<p class="text-xs text-gray-500 mb-4">Zu diesem Prospekt liefert Lidl keine Produktdaten, die Artikel stehen nur auf den Seiten.
+      Einen Artikel kannst du unter 📦 Artikel → ＋ Neuer Artikel selbst anlegen.</p>` : ''}
+    ${products.length ? `<h3 class="section-title">Produkte des Onlineshops (${products.length})</h3>
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-5">${products.map(renderLeafletProduct).join('')}</div>` : ''}
     ${pages.length ? `<h3 class="section-title">Seiten (${pages.length})</h3>
       <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">${pages.map(renderPage).join('')}</div>`
@@ -1172,20 +1998,40 @@ function renderPage(page) {
          class="w-full rounded-lg border border-gray-100 bg-gray-50">${label}</a>`;
 }
 
+// A product of the online shop, it opens its article (with the link to the online shop)
 function renderLeafletProduct(p) {
-  const image = safeUrl(p.image), url = safeUrl(p.url);
+  const image = safeUrl(p.image);
   const pages = (p.pages || []).map(esc).join(', ');
-  const inner = `${image ? `<img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="h-24 w-full object-contain mb-1.5">` : ''}
+  return `<div class="bg-gray-50 rounded-xl p-2 hover:bg-gray-100 cursor-pointer" data-article-key="web:${esc(p.id)}">
+    ${image ? `<img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="h-24 w-full object-contain mb-1.5">` : ''}
     <div class="text-[10px] uppercase text-gray-400 truncate">${esc(p.brand)}</div>
     <div class="text-xs font-semibold text-gray-800 line-clamp-2">${esc(p.title)}</div>
     <div class="flex items-baseline justify-between mt-1">
       <span class="text-sm font-bold text-[#003882]">${p.price != null ? fmt(p.price) : ''}</span>
       ${pages ? `<span class="text-[10px] text-gray-400">S. ${pages}</span>` : ''}
-    </div>`;
-  return url
-    ? `<a href="${esc(url)}" ${EXTERNAL} class="block bg-gray-50 rounded-xl p-2 hover:bg-gray-100">${inner}</a>`
-    : `<div class="bg-gray-50 rounded-xl p-2">${inner}</div>`;
+    </div>
+  </div>`;
 }
+
+// An offer of the Lidl Plus app found on the pages of a leaflet
+function renderLeafletOffer(o) {
+  const image = safeUrl(o.image);
+  const pages = (o.pages || []).map(esc).join(', ');
+  return `<div class="bg-gray-50 rounded-xl p-2 hover:bg-gray-100 cursor-pointer" data-article-key="${esc(o.article_key || '')}">
+    ${image ? `<img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="h-24 w-full object-contain mb-1.5">` : ''}
+    <div class="text-xs font-semibold text-gray-800 line-clamp-2">${esc(offerName(o))}</div>
+    ${o.packaging ? `<div class="text-[10px] text-gray-400 line-clamp-2">${esc(o.packaging)}</div>` : ''}
+    <div class="flex items-baseline justify-between mt-1">
+      <span class="text-sm font-bold text-[#003882]">${o.price != null ? fmt(o.price) : esc(o.price_text)}</span>
+      ${pages ? `<span class="text-[10px] text-gray-400">S. ${pages}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+document.getElementById('leafletBody').addEventListener('click', event => {
+  const card = event.target.closest('[data-article-key]');
+  if (card && card.dataset.articleKey) openArticle(card.dataset.articleKey);
+});
 
 // Search in the articles bought before, the offers and the pages and products of the leaflets
 async function searchAll(event) {
@@ -1223,7 +2069,7 @@ function renderSearchResults(result, query) {
   let html = '';
   if (offers.length) {
     html += section('🏷️ Angebote deiner Filialen', offers.map(o => `
-      <div class="flex items-center gap-3 py-1.5 border-b border-gray-50 last:border-0">
+      <div class="flex items-center gap-3 py-1.5 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50" data-article-key="${esc(o.article_key || '')}">
         <span class="flex-1 min-w-0 truncate">${esc(offerName(o))}</span>
         <span class="shrink-0 font-semibold text-[#003882]">${o.price != null ? fmt(o.price) : esc(o.price_text)}</span>
         <span class="shrink-0">${validity(o)}</span>
@@ -1231,7 +2077,7 @@ function renderSearchResults(result, query) {
   }
   if (products.length) {
     html += section('🧾 In deinen Einkäufen', products.map(p => `
-      <div class="flex items-center gap-3 py-1.5 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50" data-product-id="${esc(p.id)}">
+      <div class="flex items-center gap-3 py-1.5 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50" data-article-key="nr:${esc(p.id)}">
         <span class="flex-1 min-w-0 truncate">${esc(p.name)}</span>
         <span class="shrink-0 text-xs text-gray-400">${esc(p.purchase_count)}× · zuletzt ${fmtDate(p.last_date)}</span>
         <span class="shrink-0 font-semibold">${fmt(p.last_price)}</span>
@@ -1257,8 +2103,8 @@ function renderSearchResults(result, query) {
 document.getElementById('searchResults').addEventListener('click', event => {
   const leaflet = event.target.closest('button[data-leaflet-id]');
   if (leaflet) return openLeaflet(leaflet.dataset.leafletId);
-  const product = event.target.closest('[data-product-id]');
-  if (product) showProductDetail(product.dataset.productId);
+  const article = event.target.closest('[data-article-key]');
+  if (article && article.dataset.articleKey) openArticle(article.dataset.articleKey);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1298,6 +2144,7 @@ function busyLabel(value) {
 }
 
 function renderBusy() {
+  renderDuration();
   const busy = appData.busy_times;
   const storeTitle = document.getElementById('busyStore');
   const now = new Date(), today = weekdayOf(now);
@@ -1405,6 +2252,93 @@ function renderBusy() {
     source.textContent = busy.forecast_error
       ? `BestTime.app: ${busy.forecast_error}`
       : 'Für echte Stoßzeiten: ein Konto bei besttime.app anlegen und den privaten API-Schlüssel unter Einstellungen → Geräte & Dienste → Lidl Plus → Konfigurieren eintragen. Bis dahin siehst du, wann du selbst hier einkaufst.';
+  }
+}
+
+// ── Einkaufsdauer ─────────────────────────────────────────────────────────────
+const clockTime = s => {
+  const d = new Date(s);
+  return isNaN(d) ? '?' : d.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'});
+};
+const minutesText = m => m == null ? '–' : `${fmtNum(m, Number.isInteger(m) ? 0 : 1)} Min.`;
+const durationHint = html => `<div class="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">${html}</div>`;
+
+// Arrival, departure and duration of the visit of the store of a receipt
+function visitText(v) {
+  if (!v) return '';
+  if (v.status === 'ok') {
+    const checkout = v.checkout_minutes != null ? `, bis zur Kasse ${v.checkout_minutes} Min.` : '';
+    return `${clockTime(v.arrived)}–${clockTime(v.left)} Uhr (${v.minutes} Min.${checkout})`;
+  }
+  if (v.status === 'incomplete') {
+    return v.arrived ? `ab ${clockTime(v.arrived)} Uhr, das Ende wurde nicht erkannt` : `bis ${clockTime(v.left)} Uhr, die Ankunft wurde nicht erkannt`;
+  }
+  if (v.status === 'not_seen') return 'Das Handy hat während des Einkaufs keinen Standort am Markt gemeldet';
+  return 'Kein Standort aus dieser Zeit';
+}
+
+function renderDuration() {
+  const box = document.getElementById('durationBody');
+  const d = appData.shopping_duration;
+  if (!d) {
+    box.textContent = 'Noch keine Daten – die Einkaufsdauer wird bei der nächsten Aktualisierung berechnet.';
+    return;
+  }
+  const parts = [];
+  if (d.visits) {
+    const checkout = d.average_checkout_minutes != null ? `, bis zur Kasse Ø ${minutesText(d.average_checkout_minutes)}` : '';
+    parts.push(`<p>Ø <strong>${minutesText(d.average_minutes)}</strong> im Markt${checkout} (${esc(d.visits)} Einkäufe gemessen)</p>`);
+    parts.push(`<p class="text-xs text-gray-500 mt-1">Kürzester Einkauf ${minutesText(d.shortest_minutes)}, längster ${minutesText(d.longest_minutes)}</p>`);
+    const days = (d.by_weekday || []).map((m, day) => m == null ? '' : `${DAY_NAMES[day]} ${minutesText(m)}`).filter(Boolean);
+    if (days.length > 1) parts.push(`<p class="text-xs text-gray-500 mt-1">Nach Wochentag: ${days.join(' · ')}</p>`);
+    if (d.last) {
+      parts.push(`<p class="text-xs text-gray-500 mt-1">Zuletzt: ${fmtDay(d.last.date)} in ${esc(d.last.store)}, ${esc(visitText({...d.last, status: 'ok'}))}</p>`);
+    }
+  } else {
+    parts.push('<p>Noch kein Einkauf gemessen.</p>');
+  }
+  const store = d.store;
+  if (store && store.zone_created) {
+    parts.push(`<p class="text-xs text-green-700 mt-2">✓ Die Zone „${esc(store.zones[0])}“ wurde angelegt. Die Home-Assistant-App übernimmt sie beim nächsten Standort-Update.</p>`);
+  } else if (!(d.entities || []).length) {
+    parts.push(durationHint('Wähle unter Einstellungen → Geräte &amp; Dienste → Lidl Plus → Konfigurieren die Personen, deren Handy-Standort (Home-Assistant-App) die Einkaufsdauer zeigt.'));
+  } else if (store && !(store.zones || []).length) {
+    parts.push(durationHint(`<p>Damit die Home-Assistant-App gleich meldet, wann du ankommst und wieder gehst, braucht die Filiale eine eigene Zone.
+      Ohne Zone schickt das Handy bei kurzen Einkäufen oft gar keinen Standort.</p>
+      <button type="button" class="btn btn-primary mt-2" id="createZone">📍 Zone „Lidl ${esc(store.name)}“ anlegen</button>
+      <p id="zoneStatus" class="mt-1"></p>`));
+  } else if (store && !d.visits) {
+    parts.push(`<p class="text-xs text-gray-500 mt-2">✓ Die Zone „${esc(store.zones[0])}“ ist eingerichtet. Die Dauer erscheint nach dem nächsten Einkauf,
+      wenn die App den Standort im Hintergrund senden darf.</p>`);
+  }
+  parts.push(`<p class="text-[11px] text-gray-400 mt-3">Gemessen mit dem Standort der Home-Assistant-App: vom ersten Standort am Markt bis zum ersten danach.
+    Home Assistant behält Standorte nur wenige Tage, deshalb werden neue Einkäufe gemessen.</p>`);
+  box.innerHTML = parts.join('');
+}
+
+document.getElementById('durationBody').addEventListener('click', event => {
+  const button = event.target.closest('#createZone');
+  if (button) createStoreZone(button);
+});
+
+// A zone around the store: the app reports entering and leaving it right away (Home Assistant allows this to administrators)
+async function createStoreZone(button) {
+  const store = (appData.shopping_duration || {}).store;
+  if (!store) return;
+  const status = document.getElementById('zoneStatus');
+  const name = `Lidl ${store.name}`;
+  button.disabled = true;
+  status.textContent = 'Lege die Zone an…';
+  try {
+    await postCall({type: 'lidl-plus:call', request: {
+      type: 'zone/create', name, latitude: store.latitude, longitude: store.longitude, radius: 100, icon: 'mdi:cart', passive: false,
+    }});
+    store.zones = [name];
+    store.zone_created = true;
+    renderDuration();
+  } catch (err) {
+    button.disabled = false;
+    status.textContent = `Das hat nicht geklappt (${err.message}). Lege die Zone selbst an: Einstellungen → Bereiche, Labels & Zonen → Zonen, Radius etwa 100 m.`;
   }
 }
 

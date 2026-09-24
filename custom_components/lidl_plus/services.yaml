@@ -14,6 +14,7 @@ export:
             - products
             - offers
             - leaflets
+            - articles
     format:
       default: csv
       selector:

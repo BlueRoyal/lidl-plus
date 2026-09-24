@@ -17,6 +17,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util import slugify
 
 from ._lidlplus.api import LidlPlusApi
+from .article_api import async_setup_article_api
 from .const import CONF_COUNTRY, CONF_LANGUAGE, CONF_REFRESH_TOKEN, DOMAIN, KEY_LOYALTY_ID
 from .coordinator import LidlPlusConfigEntry, LidlPlusCoordinator
 from .panel import async_register_panel, async_setup_panel_api, async_unregister_panel
@@ -39,6 +40,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the services, the APIs and the panel."""
     async_setup_services(hass)
     async_setup_panel_api(hass)
+    async_setup_article_api(hass)
     async_setup_rest_api(hass)
     # Registered independently of the entries, so the panel stays while an entry is reloaded or cannot be set up
     await async_register_panel(hass)

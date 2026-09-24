@@ -125,6 +125,10 @@ def test_dataset():
     rows, columns = export.dataset("leaflets", TICKETS, OFFERS, LEAFLETS)
     assert columns == export.LEAFLET_COLUMNS
     assert len(rows) == 2
+    # Bought articles (without deposits), offers and products of the leaflets
+    rows, columns = export.dataset("articles", TICKETS, OFFERS, LEAFLETS)
+    assert columns == export.ARTICLE_COLUMNS
+    assert [row["key"] for row in rows] == ["web:100001", "web:100002", "nr:0082052", "nr:0082345"]
     # Leaflets are optional
     assert not export.dataset("leaflets", TICKETS, OFFERS)[0]
     with pytest.raises(ValueError):
@@ -135,6 +139,7 @@ def test_to_zip():
     cache = {"tickets": {entry["id"]: entry for entry in TICKETS}, "offers": {}}
     with zipfile.ZipFile(io.BytesIO(export.to_zip(TICKETS, OFFERS, cache, LEAFLETS))) as archive:
         assert sorted(archive.namelist()) == [
+            "articles.csv",
             "items.csv",
             "leaflets.csv",
             "lidl_plus_cache.json",
@@ -174,3 +179,33 @@ def test_export_file():
         export.export_file(cache, "items", "xlsx")
     with pytest.raises(ValueError):
         export.export_file(cache, "unknown")
+
+
+def test_export_articles():
+    cache = {"tickets": {entry["id"]: entry for entry in TICKETS}, "offers": OFFER_ARCHIVE, "leaflets": LEAFLET_ARCHIVE}
+    details = {
+        "nr:0082052": {
+            "barcodes": ["4056489123453"],
+            "package_size": "150 g",
+            "nutrition": {"energy_kcal": 21, "salt": 0.05},
+            "ingredients": "Feldsalat",
+            "images": [{"id": "a" * 32, "kind": "front"}],
+        },
+        "own:1": {"name": "Duschgel", "ingredients": "Aqua"},
+    }
+    rows = json.loads(export.export_file(cache, "articles", "json", article_details=details))
+    by_key = {row["key"]: row for row in rows}
+    assert by_key["nr:0082052"]["barcodes"] == "4056489123453"
+    assert by_key["nr:0082052"]["energy_kcal"] == 21
+    assert by_key["nr:0082052"]["photos"] == 1
+    assert by_key["nr:0082052"]["sources"] == "receipts, offers"
+    assert by_key["own:1"]["name"] == "Duschgel"
+    lines = export.export_file(cache, "articles", "csv", article_details=details).decode("utf-8-sig").splitlines()
+    assert lines[0] == ";".join(export.ARTICLE_COLUMNS)
+    assert ";0,05;" in next(line for line in lines if line.startswith("nr:0082052"))
+    # The details added by hand are part of the ZIP file
+    with zipfile.ZipFile(io.BytesIO(export.export_file(cache, "all", article_details=details))) as archive:
+        assert json.loads(archive.read("lidl_plus_articles.json")) == details
+        assert "Duschgel" in archive.read("articles.csv").decode("utf-8-sig")
+    with zipfile.ZipFile(io.BytesIO(export.export_file(cache, "all"))) as archive:
+        assert "lidl_plus_articles.json" not in archive.namelist()

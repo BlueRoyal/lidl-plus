@@ -13,7 +13,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import CURRENCY_EURO, MAX_LENGTH_STATE_STATE, PERCENTAGE, EntityCategory
+from homeassistant.const import CURRENCY_EURO, MAX_LENGTH_STATE_STATE, PERCENTAGE, EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -52,6 +52,7 @@ from .const import (
     KEY_SAVINGS_BY_MONTH,
     KEY_SAVINGS_MONTH,
     KEY_SAVINGS_TOTAL,
+    KEY_SHOPPING_DURATION,
     KEY_SHOPPING_FREQUENCY,
     KEY_SPENDING_BY_MONTH,
     KEY_SPENDING_BY_STORE,
@@ -137,6 +138,24 @@ def _busyness_attributes(data: dict) -> dict:
         "today": forecast["hours"][dt_util.now().weekday()] if forecast else None,
         "forecast_updated": forecast.get("updated"),
         "source": "BestTime.app" if forecast else None,
+    }
+
+
+def _last_visit(data: dict) -> dict:
+    return (data.get(KEY_SHOPPING_DURATION) or {}).get("last") or {}
+
+
+def _shopping_duration_attributes(data: dict) -> dict:
+    duration = data.get(KEY_SHOPPING_DURATION) or {}
+    last = duration.get("last") or {}
+    return {
+        "store": last.get("store"),
+        "receipt_date": last.get("date"),
+        "arrived": last.get("arrived"),
+        "left": last.get("left"),
+        "checkout_minutes": last.get("checkout_minutes"),
+        "average_minutes": duration.get("average_minutes"),
+        "visits": duration.get("visits"),
     }
 
 
@@ -480,6 +499,16 @@ SENSOR_DESCRIPTIONS: tuple[LidlPlusSensorDescription, ...] = (
         value_fn=_busyness_now,
         attrs_fn=_busyness_attributes,
         hourly=True,
+    ),
+    # ── Einkaufsdauer: wie lange der letzte Einkauf gedauert hat ─────────────
+    LidlPlusSensorDescription(
+        key="last_shopping_duration",
+        translation_key="last_shopping_duration",
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        device_class=SensorDeviceClass.DURATION,
+        icon="mdi:timer-outline",
+        value_fn=lambda d: _last_visit(d).get("minutes"),
+        attrs_fn=_shopping_duration_attributes,
     ),
     # ── Aktuelle und kommende Prospekte ──────────────────────────────────────
     LidlPlusSensorDescription(

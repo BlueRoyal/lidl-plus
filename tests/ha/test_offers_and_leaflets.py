@@ -17,7 +17,14 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 
-from custom_components.lidl_plus.const import CONF_COUNTRY, CONF_LANGUAGE, CONF_OFFER_STORES, CONF_REFRESH_TOKEN, DOMAIN
+from custom_components.lidl_plus.const import (
+    CONF_COUNTRY,
+    CONF_LANGUAGE,
+    CONF_OFFER_STORES,
+    CONF_REFRESH_TOKEN,
+    CONF_VISIT_ENTITIES,
+    DOMAIN,
+)
 
 from sample_data import flyer, leaflet, leaflet_overview, offer
 
@@ -170,7 +177,7 @@ async def test_options_with_stores_of_the_receipts(
     result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_OFFER_STORES: ["DE2000"]})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
-    assert config_entry.options == {CONF_OFFER_STORES: ["DE2000"]}
+    assert config_entry.options == {CONF_OFFER_STORES: ["DE2000"], CONF_VISIT_ENTITIES: []}
     # The offers of the new store are loaded right away
     assert api_state.offer_calls[-1] == ["DE2000"]
     assert hass.states.get("sensor.lidl_plus_current_offers").attributes["offers"][0]["title"] == "Shampoo"

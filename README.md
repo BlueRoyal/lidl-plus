@@ -205,7 +205,23 @@ upcoming = [leaflet for leaflet in lidl.cached_leaflets() if leaflet["status"] =
 analytics.search_leaflets(lidl.cached_leaflets(), "kaffee")
 ```
 
-The weekly leaflets differ between the offer regions of Lidl: `lidl.leaflet_region("DE1234")` finds the region of a store in the public store directory of lidl.de (only Germany, kept in the cache for 30 days) and `lidl.sync_leaflets(region=10)` loads the variants of this region, in the CLI `leaflets --store DE1234` and `sync --store DE1234 --leaflets`. Without a region the national leaflets are used. Food offers are no products of a leaflet, they are only found by the text of their page. Leaflets are often published before they are complete, so upcoming leaflets are loaded again once a day until their offers start. The products of a leaflet are articles of the Lidl online shop, their IDs differ from the article numbers on the receipts. A leaflet with pages and products takes about 200 KB in the cache, so the cache grows by roughly 10–15 MB per year.
+The weekly leaflets differ between the offer regions of Lidl: `lidl.leaflet_region("DE1234")` finds the region of a store in the public store directory of lidl.de (only Germany, kept in the cache for 30 days) and `lidl.sync_leaflets(region=10)` loads the variants of this region, in the CLI `leaflets --store DE1234` and `sync --store DE1234 --leaflets`. Without a region the national leaflets are used. Food offers are no products of a leaflet, they are only found by the text of their page. Leaflets are often published before they are complete, so upcoming leaflets are loaded again once a day until their offers start. The products of a leaflet are articles of the Lidl online shop, their IDs differ from the article numbers on the receipts. A weekly leaflet with pages and products takes about 0.5 MB in the cache, so the cache grows by roughly 25–35 MB per year.
+
+### Article database
+
+Every article known from the receipts, the offers and the leaflets, merged by article: the receipts and offers share the Lidl article number, the products of the leaflets have their own number in the online shop, and offers of several articles (e.g. all flavours of a brand) are an article of their own. The food offers are only printed on the pages of a leaflet, `articles.offers_of_leaflet()` finds them by the text of the pages.
+
+```python
+from lidlplus import analytics, articles
+
+cache = lidl.cached_data()
+offers = analytics.archived_offers(cache["offers"])
+catalog = articles.article_catalog(cache["tickets"].values(), offers, analytics.archived_leaflets(cache["leaflets"]))
+# Details added by hand (barcodes, package size, nutrition values, ingredients, notes), see Home Assistant
+merged = articles.merge_user_data(catalog, {"nr:0082052": {"barcodes": ["4056489123453"], "package_size": "150 g"}})
+articles.find_articles(merged, "skyr", kind="bought", sort="price-asc")
+articles.normalize_barcode("4 056489 123453")  # "4056489123453", None for a wrong check digit
+```
 
 ### Export
 
@@ -216,7 +232,7 @@ lidl-plus --cache lidlplus_cache.json export products.json     # the file name s
 lidl-plus --cache lidlplus_cache.json export bons.csv --dataset receipts
 ```
 
-Tables: `receipts`, `items` (every article line with discounts), `products` (statistics per article), `offers` and `leaflets` (products of the leaflets). CSV files use semicolons, decimal commas and UTF-8 with BOM, so they open correctly in Excel and LibreOffice with German settings. In Python: `lidlplus.export.export_file(lidl.cached_data(), "items", "csv")`.
+Tables: `receipts`, `items` (every article line with discounts), `products` (statistics per article), `offers`, `leaflets` (products of the leaflets) and `articles` (the article database, in Home Assistant with the details added by hand). CSV files use semicolons, decimal commas and UTF-8 with BOM, so they open correctly in Excel and LibreOffice with German settings. In Python: `lidlplus.export.export_file(lidl.cached_data(), "items", "csv")`.
 
 ## CLI Reference
 ```
@@ -254,18 +270,20 @@ A fully featured Home Assistant custom integration is included in `custom_compon
 
 ### Features
 - **25+ sensors**: spending by month, average basket, food/non-food categories, savings, coupons, price changes, restock suggestions, current and upcoming offers, offers for articles you bought before, leaflets, last receipt, loyalty ID, and more (names in English and German)
-- **Sidebar panel**, added automatically, with five tabs (and an account selector if several accounts are set up):
+- **Sidebar panel**, added automatically, with six tabs (and an account selector if several accounts are set up):
   - **Übersicht**: KPI cards, monthly spending and savings chart, food/non-food donut chart, top stores chart
-  - **Kassenbons**: all receipts with every article, weight, discount, deposit, deposit return and payment; filter by store, date range, amount
-  - **Artikel**: all products with purchase stats, savings, price trend badges, filter by trend/period, detail modal with price history line chart
+  - **Kassenbons**: all receipts with every article, weight, discount, deposit, deposit return and payment, and how long the shopping took; filter by store, date range, amount
+  - **Artikel**: the article database, see below
   - **Angebote**: current and upcoming offers of your stores, marked if you bought the article before
-  - **Prospekte**: current and upcoming leaflets of the offer region of your store with PDF, pages and products, and a search across leaflets, offers and your purchases
-  - **Stoßzeiten**: busy hours of your store per weekday and hour like on Google, with its opening hours and the hours at which you went shopping
+  - **Prospekte**: current and upcoming leaflets of the offer region of your store with PDF, pages, the products of the online shop and the offers of the Lidl Plus app printed on the pages, and a search across leaflets, offers and your purchases
+  - **Stoßzeiten**: busy hours of your store per weekday and hour like on Google, with its opening hours, the hours at which you went shopping and how long your shopping takes
   - **Export** button: download everything as ZIP or a single table as CSV
+- **Article database**: every article you bought, every offer of the Lidl Plus app and every product of the leaflets, with purchases and price history, offers and leaflets. Add barcodes, package size, nutrition values, ingredients (also of non-food articles like cosmetics or cleaning agents), notes and photos, e.g. of the nutrition label. **Scan the barcode** with the Home Assistant app (its scanner opens) or in the browser with the camera (Chrome on Android) or by typing it: a known barcode opens its article, an unknown one is looked up in [Open Food Facts](https://world.openfoodfacts.org), Open Beauty Facts and Open Products Facts (only the barcode is sent) and can be added to an article or saved as a new one with the values found. The details belong to the household and are shared by all accounts; they are kept in `/config/.storage/lidl_plus_articles`, the photos in `/config/lidl_plus/images/` (both part of the Home Assistant backups and of the export)
+- **Shopping duration**: from the location history of the persons (Home Assistant companion app) the integration sees when you arrived at the store of a receipt and when you left, shown with the receipt, in the tab *Stoßzeiten* (average, by weekday) and as sensor *Last shopping duration*. The app reports its location reliably only when entering or leaving a zone, so create a zone around the store (the panel does it with one click). Home Assistant keeps locations for 10 days, so every visit is saved as soon as it is known; only the times of arrival and departure are kept, no locations
 - **Offers and leaflets are kept**: every offer and leaflet seen stays in the cache, also after it ended
 - **REST API** for AI assistants and other programs, see below
 - **Services**: `lidl_plus.sync` (force refresh), `lidl_plus.activate_all_coupons` (returns the activated coupons), `lidl_plus.export` (writes the data to `/config/lidl_plus_export/`, e.g. for a weekly automation)
-- **Configure** chooses the stores whose offers are loaded (from your receipts or by searching a city, postal code or street), without a choice the store you visit most is used. The first store also sets the region of the leaflets and the store of the busy hours
+- **Configure** chooses the stores whose offers are loaded (from your receipts or by searching a city, postal code or street), without a choice the store you visit most is used. The first store also sets the region of the leaflets and the store of the busy hours. It also chooses the persons for the shopping duration (all persons until the options are saved, none turns it off)
 - **Busy hours** (optional): Google offers no interface for its busy hours, so they come from [BestTime.app](https://besttime.app): create an account and enter its private API key under *Configure*. A forecast costs 2 credits, it is renewed every 3 weeks and kept in Home Assistant; the sensor *Store busyness* shows the expected busyness of the current hour. Without key the panel shows the opening hours of the store (from lidl.de) and the hours at which you went shopping
 - **Re-authentication**: if Lidl rejects the refresh token, Home Assistant asks for a new one. Country, language and token can be changed with *Reconfigure*
 - Refresh tokens replaced by the auth server are saved automatically, several Lidl Plus accounts can be added
@@ -286,7 +304,7 @@ The *Lidl Plus* panel appears in the sidebar, no `configuration.yaml` changes ar
 
 ### REST API for AI assistants
 
-All data of the integration can be read with a Home Assistant access token, e.g. by your own bot or an AI assistant. The API only reads, it cannot activate coupons or change anything.
+All data of the integration can be read with a Home Assistant access token, e.g. by your own bot or an AI assistant. The API only reads, it cannot activate coupons or change anything (the details of the articles are changed in the panel).
 
 1. Create a user for the assistant (*Settings → People → Users*, no administrator) and log in with it once
 2. In its profile (*Security → Long-lived access tokens*) create a token
@@ -312,8 +330,11 @@ curl -H "Authorization: Bearer $TOKEN" -OJ "http://homeassistant.local:8123/api/
 | `/offers?status=upcoming` | offers: `active` (default), `current`, `upcoming`, `expired`, `all`; `bought=true` for articles bought before |
 | `/leaflets`, `/leaflets/{id}` | leaflets (same `status` values), a single one with the text of every page and its products |
 | `/busy_times` | opening hours and busy hours of the store (BestTime.app), `busyness_now`, and the hours of your own receipts |
+| `/shopping_duration` | how long the shopping took: average, by weekday, the last visits with arrival and departure |
+| `/articles?q=skyr&kind=nutrition` | the article database with barcodes, package size, nutrition values, ingredients and notes; `kind=` `bought`, `offers`, `leaflets`, `own`, `details`, `nutrition`, `no_nutrition`, `ingredients`, `photos`, `barcode`, `sort=` |
+| `/articles/{key}`, `/images/{id}` | an article with all details (e.g. `nr:0082052`), a photo of an article |
 | `/coupons`, `/stores`, `/accounts` | coupons, stores of the receipts and of the offers, configured accounts (`entry_id=` selects the account) |
-| `/export?dataset=items&format=csv` | download: `all` (ZIP), `receipts`, `items`, `products`, `offers`, `leaflets` as CSV or JSON |
+| `/export?dataset=items&format=csv` | download: `all` (ZIP), `receipts`, `items`, `products`, `offers`, `leaflets`, `articles` as CSV or JSON |
 
 A Home Assistant token allows everything its user may do in Home Assistant, not only reading this API. Give the assistant its own user without administrator rights and delete the token when it is not needed anymore.
 
@@ -337,9 +358,20 @@ pytest                                  # additionally the Home Assistant integr
 cd tests/frontend && npm ci && npm test # the sidebar panel (panel.js and index.html) with jsdom
 ```
 
-`custom_components/lidl_plus/_lidlplus/` contains a copy of `api.py`, `analytics.py`, `exceptions.py` and `export.py` for Home Assistant. Change the files in `lidlplus/` and copy them over, `tests/test_vendored_copy.py` fails if they differ.
+`custom_components/lidl_plus/_lidlplus/` contains a copy of `api.py`, `analytics.py`, `articles.py`, `exceptions.py` and `export.py` for Home Assistant. Change the files in `lidlplus/` and copy them over, `tests/test_vendored_copy.py` fails if they differ.
 
 ## Changelog
+
+### 1.3.0 — Home Assistant integration (2026-09-24)
+- Article database in the tab *Artikel*: every article bought, offered or shown in a leaflet, with search and filters (bought, offers, leaflets, own articles, with nutrition values, photos, barcode, …); details added by hand: barcodes, package size, nutrition values per 100 g/ml, ingredients (also for non-food), notes and photos (made smaller before they are sent); articles added by hand
+- Barcode scanner: the scanner of the Home Assistant app, the camera in the browser or typing the barcode; unknown barcodes are looked up in Open Food Facts, Open Beauty Facts and Open Products Facts and can be added to an article or saved as a new one
+- The leaflets show the offers of the Lidl Plus app printed on their pages (Lidl provides product data only for the products of the online shop); products and offers open their article
+- Shopping duration from the location history of the persons, matched with the receipts: arrival, departure and time until paying for every receipt, statistics in the tab *Stoßzeiten*, sensor *Last shopping duration*, a button that creates a zone around the store; *Configure* chooses the persons
+- REST API: `/articles`, `/articles/{key}`, `/images/{id}`, `/shopping_duration`, receipts with their `visit`; export table `articles` (the ZIP file also contains the details added by hand)
+
+### 0.6.0 — Python library (2026-09-24)
+- New module `lidlplus.articles`: article catalog of the receipts, offers and leaflets, the offers printed on the pages of a leaflet, details added by hand, search, barcode check (EAN/UPC)
+- Export table `articles`
 
 ### 1.2.0 — Home Assistant integration (2026-09-24)
 **New**

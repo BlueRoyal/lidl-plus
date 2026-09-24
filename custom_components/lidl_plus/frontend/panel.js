@@ -22,9 +22,25 @@
 const HOST_OFFSET = "--lidl-panel-host-offset";
 const PAGE_URL = new URL("index.html", import.meta.url);
 PAGE_URL.search = new URL(import.meta.url).search; // keep the ?v= cache buster
-// Websocket commands the page may send besides panel_data, all of them only read
-const PAGE_COMMANDS = new Set(["lidl_plus/leaflet", "lidl_plus/search"]);
+// Websocket commands the page may send besides panel_data
+const PAGE_COMMANDS = new Set([
+  "lidl_plus/leaflet",
+  "lidl_plus/search",
+  // Article database: search, details, changes, barcodes and photos
+  "lidl_plus/articles",
+  "lidl_plus/article",
+  "lidl_plus/article_save",
+  "lidl_plus/article_delete",
+  "lidl_plus/barcode",
+  "lidl_plus/article_image",
+  "lidl_plus/article_image_delete",
+  // A zone around the store for the shopping duration, Home Assistant allows this to administrators only
+  "zone/create",
+]);
 const EXPORT_PATH = "/api/lidl_plus/export";
+// Messages of the Home Assistant app that end a scan of its barcode scanner
+const SCAN_RESULT = "bar_code/scan_result";
+const SCAN_ABORTED = "bar_code/aborted";
 
 class LidlPlusPanel extends HTMLElement {
   constructor() {
@@ -36,6 +52,7 @@ class LidlPlusPanel extends HTMLElement {
     this._menuVisible = undefined;
     this._hostOffset = undefined;
     this._resizeObserver = undefined;
+    this._scanListener = null;
     this._onMessage = this._onMessage.bind(this);
     this._updateHostOffset = this._updateHostOffset.bind(this);
   }
@@ -88,6 +105,7 @@ class LidlPlusPanel extends HTMLElement {
       this._resizeObserver = undefined;
     }
     window.removeEventListener("message", this._onMessage);
+    this._stopScan({ cancelled: true, reason: "closed" });
   }
 
   // How much of the viewport the panel host takes up around us. The insets can
@@ -130,6 +148,8 @@ class LidlPlusPanel extends HTMLElement {
       this._answer(message.id, () => this._call(message.request));
     } else if (message.type === "lidl-plus:export") {
       this._answer(message.id, () => this._export(message));
+    } else if (message.type === "lidl-plus:scan") {
+      this._answer(message.id, () => this._scan());
     } else if (message.type === "lidl-plus:toggle-menu") {
       // Same event as the menu button of the built-in panels
       this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
@@ -170,6 +190,55 @@ class LidlPlusPanel extends HTMLElement {
     const { path } = await this._hass.callWS({ type: "auth/sign_path", path: `${EXPORT_PATH}?${params}` });
     this._download(path);
     return true;
+  }
+
+  // The barcode scanner of the Home Assistant app (like the one for Matter QR codes). The frontend keeps its
+  // listeners for the results to itself, so the messages of the app are read before the frontend handles them.
+  // Resolves with {code, format}, {cancelled, reason} or {unsupported} (browser: the page uses the camera).
+  _scan() {
+    const external = this._hass && this._hass.auth && this._hass.auth.external;
+    if (!external || !external.config || !external.config.hasBarCodeScanner || typeof window.externalBus !== "function") {
+      return Promise.resolve({ unsupported: true });
+    }
+    this._stopScan({ cancelled: true, reason: "restarted" });
+    return new Promise((resolve) => {
+      const original = window.externalBus;
+      const listener = (message) => {
+        let msg = message;
+        try {
+          if (typeof msg === "string") msg = JSON.parse(msg);
+        } catch (err) {
+          msg = null;
+        }
+        if (msg && msg.type === "command" && msg.command === SCAN_RESULT) {
+          external.fireMessage({ type: "bar_code/close" });
+          this._stopScan({ code: String((msg.payload && msg.payload.rawValue) || ""), format: msg.payload && msg.payload.format });
+        } else if (msg && msg.type === "command" && msg.command === SCAN_ABORTED) {
+          this._stopScan({ cancelled: true, reason: msg.payload && msg.payload.reason });
+        }
+        // The frontend answers the app as before
+        return original(message);
+      };
+      this._scanListener = { listener, original, resolve };
+      window.externalBus = listener;
+      external.fireMessage({
+        type: "bar_code/scan",
+        payload: {
+          title: "Artikel scannen",
+          description: "Halte die Kamera auf den Strichcode (EAN) der Verpackung.",
+          alternative_option_label: "Barcode eintippen",
+        },
+      });
+    });
+  }
+
+  _stopScan(result) {
+    const scan = this._scanListener;
+    if (!scan) return;
+    this._scanListener = null;
+    // Another script may have wrapped the bus meanwhile, then it keeps calling our listener, which only passes on
+    if (window.externalBus === scan.listener) window.externalBus = scan.original;
+    scan.resolve(result);
   }
 
   _download(path) {

@@ -389,6 +389,15 @@ async def test_diagnostics(hass: HomeAssistant, api_state: FakeApiState, config_
         "offers": 2,
         "leaflets": 2,
         "leaflets_without_products": 0,
+        "articles": 7,
+    }
+    # Without persons there are no visits, and never their times or places
+    assert diagnostics["shopping_duration"] == {
+        "persons": 0,
+        "visits": 0,
+        "store_location_known": True,
+        "store_zone": False,
+        "receipts_with_visit": 0,
     }
     assert diagnostics["leaflet_region_known"] is False
     assert diagnostics["busy_times"] == {"opening_hours_known": True, "forecast": False, "forecast_error": None}

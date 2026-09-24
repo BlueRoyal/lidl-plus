@@ -19,6 +19,7 @@ from custom_components.lidl_plus.const import (
     CONF_COUNTRY,
     CONF_LANGUAGE,
     CONF_OFFER_STORES,
+    CONF_VISIT_ENTITIES,
     CONF_REFRESH_TOKEN,
     DOMAIN,
 )
@@ -165,7 +166,7 @@ async def test_options_with_besttime_key(
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
-    assert config_entry.options == {CONF_OFFER_STORES: [], CONF_BESTTIME_API_KEY: "pri_secret"}
+    assert config_entry.options == {CONF_OFFER_STORES: [], CONF_VISIT_ENTITIES: [], CONF_BESTTIME_API_KEY: "pri_secret"}
     # The forecast is loaded right away
     assert config_entry.runtime_data.data["busy_times"]["forecast"]["venue_id"] == "ven_1"
 
@@ -175,4 +176,4 @@ async def test_options_with_besttime_key(
     key_field = next(key for key in schema if key == CONF_BESTTIME_API_KEY)
     assert key_field.description == {"suggested_value": "pri_secret"}
     result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_OFFER_STORES: []})
-    assert config_entry.options == {CONF_OFFER_STORES: []}
+    assert config_entry.options == {CONF_OFFER_STORES: [], CONF_VISIT_ENTITIES: []}

@@ -113,14 +113,17 @@ const data = {
   document.getElementById("receiptStore").value = "";
   window.filterReceipts();
 
-  // 7. Products: card click with an id that needs escaping opens the modal, Escape closes it
+  // 7. Articles: until the article database answers the bought articles are shown; a card with a key that needs
+  // escaping opens the dialog right away with the purchases, the details are requested; Escape closes it
   const grid = document.getElementById("productGrid");
   assert.strictEqual(grid.querySelectorAll("img").length, 0);
-  const card = [...grid.querySelectorAll("[data-product-id]")].find((el) => el.dataset.productId === "a'\"><x");
+  const card = [...grid.querySelectorAll("[data-article-key]")].find((el) => el.dataset.articleKey === "nr:a'\"><x");
   card.querySelector("div").click();
   const modal = document.getElementById("productModal");
   assert.ok(modal.classList.contains("open"));
   assert.strictEqual(document.getElementById("modalTitle").textContent, "Milch <img src=x onerror=alert(1)>");
+  assert.ok(document.getElementById("modalStats").textContent.includes("3×"));
+  assert.strictEqual(json(parentMessages.at(-1).msg.request), json({ type: "lidl_plus/article", key: "nr:a'\"><x", entry_id: "e1" }));
   document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
   assert.ok(!modal.classList.contains("open"));
 
@@ -146,7 +149,7 @@ const data = {
   // 10. An error keeps the data and shows the banner
   send({ type: "lidl-plus:error", message: "Verbindung verloren" });
   assert.ok(document.getElementById("errorBanner").textContent.includes("Verbindung verloren"));
-  assert.ok(document.getElementById("productGrid").querySelectorAll("[data-product-id]").length > 0);
+  assert.ok(document.getElementById("productGrid").querySelectorAll("[data-article-key]").length > 0);
 
   // 11. Menu button
   send({ type: "lidl-plus:menu", visible: true });
@@ -167,7 +170,7 @@ const data = {
   send({ type: "lidl-plus:data", data: { ...data, accounts: accounts.slice(0, 1) } });
   assert.ok(document.getElementById("accountSelect").classList.contains("hidden"), "one account, no selector");
   assert.strictEqual(document.getElementById("receiptList").querySelectorAll("[data-receipt-id]").length, 2);
-  assert.ok(document.getElementById("productGrid").querySelectorAll("[data-product-id]").length === 2);
+  assert.ok(document.getElementById("productGrid").querySelectorAll("[data-article-key]").length === 2);
   const banner = document.getElementById("errorBanner");
   assert.ok(!banner.classList.contains("hidden") && banner.textContent.includes("Übersicht"), banner.textContent);
   // The next request loads everything again instead of sending known_sync
@@ -351,7 +354,7 @@ const details = {
   assert.ok(found.indexOf("Angebote deiner Filialen") < found.indexOf("In deinen Einkäufen"));
   assert.ok(found.indexOf("In deinen Einkäufen") < found.indexOf("In Prospekten"));
   assert.strictEqual(results.querySelectorAll("img[src='https://example.invalid/p1.jpg']").length, 1, "the page without thumbnail shows the image");
-  results.querySelector("[data-product-id='k']").click();
+  results.querySelector("[data-article-key='nr:k']").click();
   assert.ok(document.getElementById("productModal").classList.contains("open"));
   assert.ok(document.getElementById("modalSavings").textContent.includes("1,20"));
   window.closeProductModal();
