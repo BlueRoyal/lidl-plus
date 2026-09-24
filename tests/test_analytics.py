@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from lidlplus import analytics
-from sample_data import Receipt, flyer, item, leaflet, leaflet_overview, offer, ticket
+from sample_data import Receipt, directory_page, flyer, item, leaflet, leaflet_overview, offer, ticket
 
 
 @pytest.mark.parametrize(
@@ -393,6 +393,7 @@ def test_leaflet_overview():
         "pdf": "https://assets.example.invalid/l1-hires-01.pdf",
         "thumbnail": "https://images.example.invalid/l1.jpg",
         "url": "https://www.lidl.de/l/prospekte/aktionsprospekt-21-09-2026-26-09-2026-1fb6af/ar/0?lf=HHZ",
+        "regions": ["0"],
     }
     # Without the JSON link the identifier is taken from the address of the leaflet
     assert analytics.normalize_leaflet({**WEEKLY, "flyerJson": ""})["identifier"] == leaflets[0]["identifier"]
@@ -522,3 +523,57 @@ def test_archived_and_searched_leaflets():
         "l3",
         "l1",
     ]
+
+
+def test_leaflets_of_region():
+    national = analytics.normalize_leaflet(WEEKLY)
+    region_10 = analytics.normalize_leaflet({**WEEKLY, "id": "r10", "regions": [{"code": "10"}, {"code": "42"}]})
+    region_2 = analytics.normalize_leaflet({**WEEKLY, "id": "r2", "regions": [{"type": "offer_region", "code": "2"}]})
+    travel = analytics.normalize_leaflet(TRAVEL)
+    # Saved before the regions were known
+    old = {key: value for key, value in analytics.normalize_leaflet(NEXT_WEEK).items() if key != "regions"}
+    leaflets = [national, region_10, region_2, travel, old]
+    # The regional variant replaces the national leaflet of the same week, other regions are left out
+    assert [entry["id"] for entry in analytics.leaflets_of_region(leaflets, 10)] == ["r10", "l3", "l2"]
+    assert [entry["id"] for entry in analytics.leaflets_of_region(leaflets, "42")] == ["r10", "l3", "l2"]
+    assert [entry["id"] for entry in analytics.leaflets_of_region(leaflets, None)] == ["l1", "l3", "l2"]
+    # A region without regional variant gets the national leaflets
+    assert [entry["id"] for entry in analytics.leaflets_of_region(leaflets, 99)] == ["l1", "l3", "l2"]
+
+
+def test_url_slug():
+    assert analytics.url_slug("Mönchengladbach") == "moenchengladbach"
+    assert analytics.url_slug("Nordrhein-Westfalen") == "nordrhein-westfalen"
+    assert analytics.url_slug("Frankfurt am Main") == "frankfurt-am-main"
+    assert analytics.url_slug("Straße 1b") == "strasse-1b"
+    assert analytics.url_slug(None) == ""
+
+
+def test_store_offer_regions():
+    page = directory_page(
+        stores=[("DE01234", 10, "Grevenbroich"), ("DE04711", 42, "Kerpen")], cities=[("Frankfurt", "/s/de-DE/x/")]
+    )
+    assert analytics.store_offer_regions(page) == {"DE01234": (10, "Grevenbroich"), "DE04711": (42, "Kerpen")}
+    # Listed again as nearby store without the name of the region
+    listed_twice = directory_page(
+        stores=[("DE01234", 10, "Grevenbroich"), ("DE01234", 10, None), ("DE04711", 42, None)]
+    )
+    assert analytics.store_offer_regions(listed_twice) == {"DE01234": (10, "Grevenbroich"), "DE04711": (42, "")}
+    assert analytics.nuxt_objects(page, "name", "url") == [{"name": "Frankfurt", "url": "/s/de-DE/x/"}]
+    assert not analytics.store_offer_regions(None)
+    assert not analytics.store_offer_regions([{"objectNumber": 5, "marketingData": 99}])
+
+
+def test_soft_hyphens_in_leaflets():
+    details = analytics.leaflet_details(
+        flyer(
+            (
+                "Chef Select Regionale Kartoffel\u00ad Salate Filial\u00adangebote",
+                [("1", "Kartoffel\u00adsalat", "0.88")],
+            )
+        )["flyer"]
+    )
+    assert details["pages"][0]["text"] == "Chef Select Regionale KartoffelSalate Filialangebote"
+    assert details["products"][0]["title"] == "Kartoffelsalat"
+    leaflet_entry = {**analytics.normalize_leaflet(WEEKLY), **details}
+    assert analytics.search_leaflets([leaflet_entry], "kartoffelsalat")[0]["pages"][0]["number"] == 1

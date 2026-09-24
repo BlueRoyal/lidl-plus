@@ -35,6 +35,7 @@ from .const import (
     KEY_FREQUENTLY_BOUGHT,
     KEY_LAST_ERROR,
     KEY_LAST_SYNC,
+    KEY_LEAFLET_REGION,
     KEY_LEAFLETS,
     KEY_LOG,
     KEY_LOYALTY_ID,
@@ -119,6 +120,11 @@ def _build_receipts(tickets: list[dict]) -> list[dict]:
         )
     receipts.sort(key=lambda receipt: receipt["date"], reverse=True)
     return receipts
+
+
+def _region_code(region: dict | None) -> int:
+    """Offer region for the leaflets, 0 are the national leaflets"""
+    return region["region"] if region else 0
 
 
 def active_offers(data: dict[str, Any]) -> list[dict]:
@@ -259,7 +265,9 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # 4. Offers of the chosen stores and leaflets, public data that is independent of the login
         offer_stores = self._offer_store_keys(stores)
-        if self._sync_public_data(offer_stores):
+        # The weekly leaflets differ between the offer regions, the region of the first store is used
+        leaflet_region = self._leaflet_region(offer_stores)
+        if self._sync_public_data(offer_stores, leaflet_region):
             cache = self.api.cached_data()
         offers = analytics.mark_bought_offers(
             [
@@ -269,10 +277,12 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ],
             items,
         )
-        # Leaflets that have not ended, with pages and products; the older ones stay in the cache
+        # Leaflets of the region that have not ended, with pages and products; all others stay in the cache
         leaflets = [
             leaflet
-            for leaflet in analytics.archived_leaflets(cache.get("leaflets"), now.date())
+            for leaflet in analytics.leaflets_of_region(
+                analytics.archived_leaflets(cache.get("leaflets"), now.date()), _region_code(leaflet_region)
+            )
             if leaflet["status"] != "expired"
         ]
 
@@ -309,6 +319,7 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             KEY_OFFERS_UPCOMING: sum(1 for offer in offers if offer["status"] == "upcoming"),
             KEY_OFFERS_FOR_YOU: [offer for offer in offers if offer["bought_products"]],
             KEY_LEAFLETS: leaflets,
+            KEY_LEAFLET_REGION: leaflet_region,
             KEY_DATA_VERSION: dt_util.utcnow().isoformat(),
             KEY_COUPONS: coupons,
             KEY_COUPONS_AVAILABLE: len(coupons) - activated,
@@ -327,7 +338,24 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return list(configured)
         return [stores[0]["id"]] if stores and stores[0]["id"] else []
 
-    def _sync_public_data(self, store_keys: list[str]) -> bool:
+    def _leaflet_region(self, store_keys: list[str]) -> dict | None:
+        """Offer region of the first store like {"region": 10, "name": "Grevenbroich", "store": "DE1234"}"""
+        if not store_keys:
+            return None
+        try:
+            # Looked up in the store directory of lidl.de only every 30 days, kept in the cache
+            region = self.api.leaflet_region(store_keys[0])
+        except Exception as exc:  # noqa: BLE001
+            self._log("WARNING", f"Region der Prospekte konnte nicht ermittelt werden: {exc}")
+            return None
+        if region is None:
+            self._log(
+                "INFO", f"Region der Filiale {store_keys[0]} unbekannt, es werden die bundesweiten Prospekte geladen"
+            )
+            return None
+        return {"region": region["region"], "name": region.get("name") or "", "store": store_keys[0]}
+
+    def _sync_public_data(self, store_keys: list[str], leaflet_region: dict | None) -> bool:
         """Add the offers of the stores and the leaflets to the cache, True if anything was added"""
         synced = False
         if store_keys:
@@ -339,11 +367,12 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._log("INFO", f"Angebote geladen: {new_offers} neu")
                 synced = True
         try:
-            new_leaflets = self.api.sync_leaflets()
+            new_leaflets = self.api.sync_leaflets(region=_region_code(leaflet_region) or None)
         except Exception as exc:  # noqa: BLE001
             self._log("WARNING", f"Prospekte konnten nicht geladen werden: {exc}")
         else:
-            self._log("INFO", f"Prospekte geladen: {new_leaflets} neu")
+            region = f" (Region {leaflet_region['name'] or leaflet_region['region']})" if leaflet_region else ""
+            self._log("INFO", f"Prospekte geladen: {new_leaflets} neu{region}")
             synced = True
         return synced
 
@@ -354,8 +383,9 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return analytics.mark_bought_offers(offers, items)
 
     async def async_all_leaflets(self) -> list[dict]:
-        """All leaflets of the cache, also the ones that ended"""
-        return await self.hass.async_add_executor_job(self.api.cached_leaflets, dt_util.now().date())
+        """All leaflets of the region in the cache, also the ones that ended"""
+        region = _region_code((self.data or {}).get(KEY_LEAFLET_REGION))
+        return await self.hass.async_add_executor_job(self.api.cached_leaflets, dt_util.now().date(), region)
 
     async def async_leaflet(self, leaflet_id: str) -> dict | None:
         """A leaflet with its pages and products, None if it is not in the cache"""

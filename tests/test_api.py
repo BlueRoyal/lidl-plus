@@ -11,7 +11,7 @@ import requests
 
 from lidlplus import LidlPlusApi
 from lidlplus.exceptions import AuthenticationError, MissingLogin
-from sample_data import Receipt, flyer, leaflet, leaflet_overview, offer, ticket
+from sample_data import Receipt, directory_page, flyer, leaflet, leaflet_overview, offer, ticket
 
 MILK_RECEIPT = Receipt().article("0001", "Milch", "1,09").build()
 
@@ -554,3 +554,87 @@ def test_account_id(api, session):
     session.on("GET", TICKETS_URL, lambda url, **kwargs: FakeResponse(404, {}))
     with pytest.raises(requests.HTTPError):
         api.account_id()
+
+
+STORE_URL = "https://stores.lidlplus.com/api/v1/DE/DE1234"
+DIRECTORY = "https://www.lidl.de/s/de-DE/filialen"
+
+
+def test_leaflet_region(api, session, tmp_path):
+    store = {"storeKey": "DE1234", "locality": "Mönchengladbach", "province": "Nordrhein-Westfalen"}
+    session.on("GET", STORE_URL, lambda url, **kwargs: store)
+    session.on("GET", f"{DIRECTORY}/", lambda url, **kwargs: FakeResponse(404, {}))
+    session.on("GET", f"{DIRECTORY}/nordrhein-westfalen/", lambda url, **kwargs: directory_page())
+    session.on(
+        "GET",
+        f"{DIRECTORY}/moenchengladbach/_payload.json",
+        lambda url, **kwargs: directory_page(stores=[("DE04711", 42, "Kerpen"), ("DE01234", 10, "Grevenbroich")]),
+    )
+    region = api.leaflet_region("DE1234")
+    assert (region["region"], region["name"]) == (10, "Grevenbroich")
+    # No login needed
+    assert TOKEN_URL not in session.urls()
+
+    # Kept in the cache for 30 days
+    session.calls.clear()
+    assert api.leaflet_region("DE1234")["region"] == 10
+    assert not session.calls
+    cache = json.loads((tmp_path / "cache.json").read_text(encoding="utf-8"))
+    cache["leaflet_regions"]["DE1234"]["checked"] = "2020-01-01T00:00:00+00:00"
+    (tmp_path / "cache.json").write_text(json.dumps(cache), encoding="utf-8")
+    # A failed check keeps the region found before
+    session.on("GET", STORE_URL, lambda url, **kwargs: FakeResponse(503, {}))
+    assert api.leaflet_region("DE1234")["region"] == 10
+    assert session.urls() == [STORE_URL]
+
+
+def test_leaflet_region_from_the_state_page(api, session):
+    """The directory names some cities shorter, e.g. "Frankfurt" for "Frankfurt am Main" """
+    store = {"storeKey": "DE1234", "locality": "Frankfurt am Main", "province": "Hessen"}
+    session.on("GET", STORE_URL, lambda url, **kwargs: store)
+    session.on("GET", f"{DIRECTORY}/", lambda url, **kwargs: FakeResponse(404, {}))
+    session.on(
+        "GET",
+        f"{DIRECTORY}/hessen/_payload.json",
+        lambda url, **kwargs: directory_page(
+            cities=[("Frankfurt", "/s/de-DE/filialen/frankfurt/"), ("Offenbach", "/s/de-DE/filialen/offenbach/")]
+        ),
+    )
+    session.on(
+        "GET",
+        f"{DIRECTORY}/frankfurt/_payload.json",
+        lambda url, **kwargs: directory_page(stores=[("DE01234", 5, "Kab")]),
+    )
+    assert api.leaflet_region("DE1234")["region"] == 5
+    assert f"{DIRECTORY}/offenbach/_payload.json" not in session.urls()
+
+    # Stores that are not listed use the national leaflets, the result is kept as well
+    other = LidlPlusApi("de", "DE", cache_file=None)
+    other._session = session
+    session.on("GET", "https://stores.lidlplus.com/api/v1/DE/DE9999", lambda url, **kwargs: store)
+    assert other.leaflet_region("DE9999") is None
+    # Only the German store directory is known
+    austria = LidlPlusApi("de", "AT", cache_file=None)
+    austria._session = session
+    assert austria.leaflet_region("AT1234") is None
+
+
+def test_sync_leaflets_of_a_region(api, session):
+    today = datetime.now().date()
+    national = leaflet("l1", "Aktionsprospekt", "aktion-0", str(today), str(today + timedelta(days=5)))
+    regional = leaflet(
+        "l2", "Aktionsprospekt", "aktion-10", str(today), str(today + timedelta(days=5)), regions=["10", "42"]
+    )
+
+    def overview(url, params, **kwargs):
+        return leaflet_overview(("Filial-Angebote", [regional if params["region_id"] == 10 else national]))
+
+    session.on("GET", LEAFLETS_URL, overview)
+    session.on("GET", FLYER_URL, lambda url, **kwargs: flyer(("Kaffee", [])))
+    api.sync_leaflets()
+    assert api.sync_leaflets(region=10) == 1
+    assert [call[2]["params"]["region_id"] for call in session.calls if call[1] == FLYER_URL] == [0, 10]
+    # All leaflets stay in the cache, a region shows its variants
+    assert [entry["id"] for entry in api.cached_leaflets()] == ["l1", "l2"]
+    assert [entry["id"] for entry in api.cached_leaflets(region=10)] == ["l2"]
+    assert [entry["id"] for entry in api.cached_leaflets(region=0)] == ["l1"]

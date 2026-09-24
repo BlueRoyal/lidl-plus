@@ -18,6 +18,7 @@ from .const import (
     KEY_CURRENT_MONTH_SPENDING,
     KEY_LAST_ERROR,
     KEY_LAST_SYNC,
+    KEY_LEAFLET_REGION,
     KEY_LEAFLETS,
     KEY_LOG,
     KEY_NEW_TICKETS_LAST_SYNC,
@@ -59,6 +60,8 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: LidlPlu
         "last_update_success": coordinator.last_update_success,
         "last_exception": repr(coordinator.last_exception) if coordinator.last_exception else None,
         "loyalty_id_error": coordinator.loyalty_error,
+        # Without the region the national leaflets are shown (the name of the region is left out, it is personal)
+        "leaflet_region_known": bool(data.get(KEY_LEAFLET_REGION)),
         "summary": {key: data.get(key) for key in _SUMMARY_KEYS},
         "counts": {
             "receipts": len(receipts),

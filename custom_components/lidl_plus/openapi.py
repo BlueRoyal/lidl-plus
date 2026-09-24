@@ -120,8 +120,9 @@ _OPERATIONS: dict[str, tuple[str, str, str, list[dict[str, Any]]]] = {
     "/leaflets": (
         "listLeaflets",
         "Leaflets",
-        "Leaflets (Prospekte) with name, category, offer days (start and end are local dates, both included), "
-        "status, PDF and online link and the number of pages and products. By default the current and upcoming "
+        "Leaflets (Prospekte) of the offer region of the store with name, category, offer days (start and end are "
+        "local dates, both included), status, PDF and online link and the number of pages and products. By default "
+        "the current and upcoming "
         f"leaflets, status=all also returns the ones that ended. {_PAGED}",
         [
             _ENTRY,
@@ -167,7 +168,8 @@ _OPERATIONS: dict[str, tuple[str, str, str, list[dict[str, Any]]]] = {
     "/stores": (
         "listStores",
         "Stores",
-        "Stores of the receipts (visits, spending, last visit) and the stores whose offers are loaded.",
+        "Stores of the receipts (visits, spending, last visit), the stores whose offers are loaded and the offer "
+        "region whose leaflets are shown (the weekly leaflets differ between the regions).",
         [_ENTRY],
     ),
     "/export": (

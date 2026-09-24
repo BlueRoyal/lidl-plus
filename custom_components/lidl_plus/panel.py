@@ -22,6 +22,7 @@ from .const import (
     KEY_DATA_VERSION,
     KEY_LAST_ERROR,
     KEY_LAST_SYNC,
+    KEY_LEAFLET_REGION,
     KEY_OFFER_STORES,
     KEY_PRODUCTS,
     KEY_RECEIPTS,
@@ -115,6 +116,7 @@ def build_panel_data(data: dict[str, Any]) -> dict[str, Any]:
         "offer_stores": data.get(KEY_OFFER_STORES, []),
         # Pages and products are loaded when a leaflet is opened
         "leaflets": [analytics.leaflet_summary(leaflet) for leaflet in active_leaflets(data)],
+        "leaflet_region": data.get(KEY_LEAFLET_REGION),
         "stores": data.get(KEY_STORES, []),
         "last_sync": data.get(KEY_LAST_SYNC),
         "last_error": data.get(KEY_LAST_ERROR),

@@ -109,6 +109,11 @@ class FakeApiState:
             "aktion-0": flyer(("Ostern", []))["flyer"],
         }
         self.leaflet_archive: dict[str, dict] = {}
+        # Offer region of the stores (None: national leaflets) and the regional leaflet overviews
+        self.leaflet_region: dict | None = None
+        self.leaflets_by_region: dict[int, Any] = {}
+        self.region_calls: list[str] = []
+        self.synced_regions: list[int | None] = []
         self.found_stores = [
             {
                 "storeKey": "DE3000",
@@ -170,12 +175,18 @@ class FakeLidlPlusApi:
     def cached_offers(self) -> list[dict]:
         return analytics.archived_offers(self._state.offer_archive)
 
-    def sync_leaflets(self) -> int:
+    def leaflet_region(self, store_key: str) -> dict | None:
+        self._state.region_calls.append(store_key)
+        return self._state.leaflet_region
+
+    def sync_leaflets(self, categories: Any = None, region: int | None = None) -> int:
         """Keeps the history like LidlPlusApi.sync_leaflets, leaflets that ended are not loaded"""
         if self._state.public_error:
             raise self._state.public_error
+        self._state.synced_regions.append(region)
         added = 0
-        for entry in analytics.leaflet_overview(self._state.leaflets):
+        overview = self._state.leaflets_by_region.get(region, self._state.leaflets)
+        for entry in analytics.leaflet_overview(overview):
             if entry["id"] not in self._state.leaflet_archive:
                 self._state.leaflet_archive[entry["id"]] = {"first_seen": NOW}
                 added += 1
@@ -185,8 +196,9 @@ class FakeLidlPlusApi:
                 archived["details"] = analytics.leaflet_details(self._state.flyers[entry["identifier"]])
         return added
 
-    def cached_leaflets(self, today: date | None = None) -> list[dict]:
-        return analytics.archived_leaflets(self._state.leaflet_archive, today)
+    def cached_leaflets(self, today: date | None = None, region: int | None = None) -> list[dict]:
+        leaflets = analytics.archived_leaflets(self._state.leaflet_archive, today)
+        return analytics.leaflets_of_region(leaflets, region) if region is not None else leaflets
 
     def search_stores(self, query: str, latitude: float, longitude: float) -> list[dict]:
         if self._state.public_error:

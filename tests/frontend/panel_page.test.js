@@ -218,6 +218,7 @@ const details = {
       start: "2026-08-28", end: "2050-08-28", pdf: "", url: "", thumbnail: "", page_count: 4, product_count: 0 },
   ],
   version: "2026-05-15T12:00:01+00:00",
+  leaflet_region: { region: 10, name: "Grevenbroich <b>", store: "DE1234" },
 };
 
 (async () => {
@@ -274,6 +275,10 @@ const details = {
   const links = [...leafletGrid.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href"), a.getAttribute("rel")]);
   assert.deepStrictEqual(links, [["PDF", "https://example.invalid/l1.pdf", "noopener noreferrer"]]);
   assert.ok(leafletGrid.textContent.includes("2 Seiten · 1 Produkte"));
+  // The offer region of the leaflets, escaped
+  const regionInfo = document.getElementById("leafletRegion");
+  assert.ok(regionInfo.textContent.startsWith("Prospekte der Angebotsregion Grevenbroich <b> (Filiale DE1234)"), regionInfo.textContent);
+  assert.strictEqual(regionInfo.querySelectorAll("b").length, 0);
   // Dates of other years show the year
   assert.ok(plain(leafletGrid).includes("28.08.2050"), plain(leafletGrid));
 

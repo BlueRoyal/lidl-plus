@@ -162,8 +162,8 @@ def offer(offer_id, title, product_ids, start, end, price=1.77, regular=3.29, di
     }
 
 
-def leaflet(leaflet_id, name, identifier, offer_start, offer_end, pdf_version=1):
-    """A leaflet of the leaflet overview, the offer days are local dates"""
+def leaflet(leaflet_id, name, identifier, offer_start, offer_end, pdf_version=1, regions=None):
+    """A leaflet of the leaflet overview, the offer days are local dates; national without regions"""
     return {
         "id": leaflet_id,
         "name": name,
@@ -178,6 +178,11 @@ def leaflet(leaflet_id, name, identifier, offer_start, offer_end, pdf_version=1)
         "endDate": offer_end,
         "offerStartDate": offer_start,
         "offerEndDate": offer_end,
+        "regions": (
+            [{"type": "offer_region", "code": code} for code in regions]
+            if regions
+            else [{"type": "national", "code": "0"}]
+        ),
     }
 
 
@@ -226,3 +231,24 @@ def flyer(*pages):
             }
         )
     return {"success": True, "flyer": result}
+
+
+def directory_page(stores=(), cities=()):
+    """
+    Data of a page of the store directory of lidl.de in the format of Nuxt: a list in which objects refer
+    to their values by index. stores as (object number, offer region, region name), cities as (name, url).
+    """
+    payload = [{"data": 1}, ["ShallowReactive", 2], {}]
+
+    def add(value):
+        payload.append(value)
+        return len(payload) - 1
+
+    for object_number, region, name in stores:
+        marketing = add(
+            {"externalUrl": -1, "offerRegion": add(region), "offerRegionName": add(name), "zone": add("DE1")}
+        )
+        add({"objectNumber": add(object_number), "storeName": add("Filiale"), "marketingData": marketing})
+    for name, url in cities:
+        add({"name": add(name), "numberOfStores": add(3), "federalState": add("Hessen"), "url": add(url)})
+    return payload

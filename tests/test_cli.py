@@ -153,11 +153,13 @@ def test_sync_with_offers(monkeypatch, tmp_path, capsys):
 
 def test_sync_with_leaflets(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(LidlPlusApi, "sync", lambda self: 0)
-    monkeypatch.setattr(LidlPlusApi, "sync_leaflets", lambda self: 3)
+    regions = []
+    monkeypatch.setattr(LidlPlusApi, "sync_leaflets", lambda self, region=None: regions.append(region) or 3)
     run_cli(
         monkeypatch, "-l", "de", "-c", "DE", "-r", "token", "--cache", str(tmp_path / "c.json"), "sync", "--leaflets"
     )
     assert "3 new leaflet(s)" in capsys.readouterr().out
+    assert regions == [None]
 
 
 def test_leaflets(monkeypatch, capsys):
@@ -170,10 +172,12 @@ def test_leaflets(monkeypatch, capsys):
             ],
         )
     )
-    monkeypatch.setattr(LidlPlusApi, "leaflets", lambda self: overview)
+    regions = []
+    monkeypatch.setattr(LidlPlusApi, "leaflets", lambda self, region=None: regions.append(region) or overview)
+    monkeypatch.setattr(LidlPlusApi, "leaflet_region", lambda self, store: {"region": 10, "name": "Grevenbroich"})
     loaded = []
 
-    def load(self, identifier):
+    def load(self, identifier, region=None):
         loaded.append(identifier)
         return flyer(("Kaffee Romana Salat", [("100001", "Akku-Bohrschrauber", "39.99")]))["flyer"]
 
@@ -187,6 +191,10 @@ def test_leaflets(monkeypatch, capsys):
     run_cli(monkeypatch, "leaflets", "--search", "Kaffee")
     results = json.loads(capsys.readouterr().out)
     assert loaded == ["aktion-1"]
+    # The regional leaflets of the offer region of a store
+    run_cli(monkeypatch, "leaflets", "--store", "DE1234")
+    assert regions == [None, None, 10]
+    capsys.readouterr()
     assert results[0]["leaflet"]["id"] == "l1"
     assert results[0]["pages"][0]["number"] == 1
 

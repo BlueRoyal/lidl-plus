@@ -546,6 +546,17 @@ def _leaflet_identifier(flyer):
     return parts[parts.index("ar") - 1] if "ar" in parts[1:] else (parts[-1] if parts else "")
 
 
+def _clean_text(text):
+    """Text of a leaflet without soft hyphens, "Kartoffel\u00ad Salate" is found as "Kartoffelsalate" """
+    return re.sub("\u00ad\\s*", "", unescape(text or ""))
+
+
+def _region_codes(flyer):
+    """Offer regions of a leaflet, "0" is the national leaflet"""
+    regions = flyer.get("regions") if isinstance(flyer.get("regions"), list) else []
+    return [str(region["code"]) for region in regions if isinstance(region, dict) and region.get("code") is not None]
+
+
 def normalize_leaflet(flyer, category="", subcategory=""):
     """Flat view of a leaflet of the leaflet overview (LidlPlusApi.leaflets)"""
     # Some leaflets stay published after the days of their offers, like the one about permanently low prices
@@ -565,7 +576,76 @@ def normalize_leaflet(flyer, category="", subcategory=""):
         "pdf": flyer.get("hiResPdfUrl") or flyer.get("pdfUrl") or "",
         "thumbnail": flyer.get("thumbnailUrl") or "",
         "url": flyer.get("flyerUrlAbsolute") or "",
+        # Offer regions of this variant of the leaflet, the weekly leaflets differ from region to region
+        "regions": _region_codes(flyer),
     }
+
+
+def leaflets_of_region(leaflets, region=None):
+    """
+    The leaflets of an offer region: its regional variants, and the national leaflets that have no regional
+    variant (same name and days) for the region. Without region only the national leaflets.
+    """
+    region = str(region) if region not in (None, "") else "0"
+
+    def regional(leaflet):
+        # Leaflets saved before the regions were known are national ones
+        return leaflet.get("regions", ["0"]) not in ([], ["0"]) and region in leaflet.get("regions", [])
+
+    def national(leaflet):
+        return leaflet.get("regions", ["0"]) in ([], ["0"])
+
+    replaced = {(leaflet.get("name"), leaflet.get("start")) for leaflet in leaflets if regional(leaflet)}
+    return [
+        leaflet
+        for leaflet in leaflets
+        if regional(leaflet) or (national(leaflet) and (leaflet.get("name"), leaflet.get("start")) not in replaced)
+    ]
+
+
+def url_slug(text):
+    """Part of an address of lidl.de like "moenchengladbach" for "Mönchengladbach" """
+    text = str(text or "").lower()
+    for umlaut, replacement in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        text = text.replace(umlaut, replacement)
+    return re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+
+
+def _nuxt_value(payload, index):
+    return payload[index] if isinstance(index, int) and 0 <= index < len(payload) else None
+
+
+def nuxt_objects(payload, *keys):
+    """
+    Objects with all the keys in a Nuxt payload (the data of a page of lidl.de), with the values of these keys.
+
+    The payload is a list, objects refer to their values by the index in this list.
+    """
+    if not isinstance(payload, list):
+        return []
+    return [
+        {key: _nuxt_value(payload, item[key]) for key in keys}
+        for item in payload
+        if isinstance(item, dict) and all(key in item for key in keys)
+    ]
+
+
+def store_offer_regions(payload):
+    """Offer regions of the stores in a page of the store directory of lidl.de: {"DE01605": (10, "Grevenbroich")}"""
+    regions = {}
+    for store in nuxt_objects(payload, "objectNumber", "marketingData"):
+        marketing = store["marketingData"]
+        if not isinstance(store["objectNumber"], str) or not isinstance(marketing, dict):
+            continue
+        region = _nuxt_value(payload, marketing.get("offerRegion"))
+        name = _nuxt_value(payload, marketing.get("offerRegionName"))
+        if not isinstance(region, int):
+            continue
+        # Stores are listed several times (e.g. as nearby store), not always with the name of the region
+        known = regions.get(store["objectNumber"])
+        if known is None or (not known[1] and isinstance(name, str) and name):
+            regions[store["objectNumber"]] = (region, name if isinstance(name, str) else "")
+    return regions
 
 
 def _dicts(values):
@@ -592,11 +672,11 @@ def normalize_leaflet_product(product):
         url = f"{link.scheme}://{link.netloc}{product['canonicalUrl']}"
     return {
         "id": str(product.get("productId") or ""),
-        "title": product.get("title") or "",
+        "title": _clean_text(product.get("title")),
         "brand": product.get("brand") or "",
         "price": to_float(product.get("price"), None),
         "category": product.get("categoryPrimary") or "",
-        "description": unescape(product.get("description") or ""),
+        "description": _clean_text(product.get("description")),
         "image": product.get("image") or "",
         "url": url,
     }
@@ -617,8 +697,8 @@ def leaflet_details(flyer):
                 "image": page.get("image") or "",
                 "thumbnail": page.get("thumbnail") or "",
                 # Words printed on the page, the only source for the food offers of a leaflet
-                "text": page.get("keyWords") or "",
-                "description": page.get("altText") or "",
+                "text": _clean_text(page.get("keyWords")),
+                "description": _clean_text(page.get("altText")),
             }
         )
         for link in _dicts(page.get("links")):

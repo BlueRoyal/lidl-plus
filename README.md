@@ -205,7 +205,7 @@ upcoming = [leaflet for leaflet in lidl.cached_leaflets() if leaflet["status"] =
 analytics.search_leaflets(lidl.cached_leaflets(), "kaffee")
 ```
 
-Food offers are no products of a leaflet, they are only found by the text of their page. Leaflets are often published before they are complete, so upcoming leaflets are loaded again once a day until their offers start. The products of a leaflet are articles of the Lidl online shop, their IDs differ from the article numbers on the receipts. A leaflet with pages and products takes about 200 KB in the cache, so the cache grows by roughly 10–15 MB per year.
+The weekly leaflets differ between the offer regions of Lidl: `lidl.leaflet_region("DE1234")` finds the region of a store in the public store directory of lidl.de (only Germany, kept in the cache for 30 days) and `lidl.sync_leaflets(region=10)` loads the variants of this region, in the CLI `leaflets --store DE1234` and `sync --store DE1234 --leaflets`. Without a region the national leaflets are used. Food offers are no products of a leaflet, they are only found by the text of their page. Leaflets are often published before they are complete, so upcoming leaflets are loaded again once a day until their offers start. The products of a leaflet are articles of the Lidl online shop, their IDs differ from the article numbers on the receipts. A leaflet with pages and products takes about 200 KB in the cache, so the cache grows by roughly 10–15 MB per year.
 
 ### Export
 
@@ -259,7 +259,7 @@ A fully featured Home Assistant custom integration is included in `custom_compon
   - **Kassenbons**: all receipts with every article, weight, discount, deposit, deposit return and payment; filter by store, date range, amount
   - **Artikel**: all products with purchase stats, savings, price trend badges, filter by trend/period, detail modal with price history line chart
   - **Angebote**: current and upcoming offers of your stores, marked if you bought the article before
-  - **Prospekte**: current and upcoming leaflets with PDF, pages and products, and a search across leaflets, offers and your purchases
+  - **Prospekte**: current and upcoming leaflets of the offer region of your store with PDF, pages and products, and a search across leaflets, offers and your purchases
   - **Export** button: download everything as ZIP or a single table as CSV
 - **Offers and leaflets are kept**: every offer and leaflet seen stays in the cache, also after it ended
 - **REST API** for AI assistants and other programs, see below
@@ -341,7 +341,7 @@ cd tests/frontend && npm ci && npm test # the sidebar panel (panel.js and index.
 ### 1.2.0 — Home Assistant integration (2026-09-24)
 **New**
 - Every detail of the receipts: discounts, weights, deposits and deposit returns, payment methods, savings and Lidl Plus points; food/non-food by the VAT rates of the receipt; sensors for the savings
-- Offers of the chosen stores (current and announced) and leaflets with their pages and products, all of them kept in the cache as history; sensors for current, upcoming and "bought before" offers and for the leaflets; *Configure* chooses the stores
+- Offers of the chosen stores (current and announced) and the leaflets of their offer region (the weekly leaflets differ from region to region) with their pages and products, all of them kept in the cache as history; sensors for current, upcoming and "bought before" offers and for the leaflets; *Configure* chooses the stores
 - Panel tabs *Angebote* and *Prospekte* with a search across leaflets, offers and your purchases; export button (ZIP or CSV)
 - REST API with OpenAPI description for AI assistants and other programs (`/api/lidl_plus/...`, authentication with an access token)
 - Service `lidl_plus.export`
@@ -372,7 +372,7 @@ cd tests/frontend && npm ci && npm test # the sidebar panel (panel.js and index.
 
 ### 0.5.0 — Python library (2026-09-24)
 - New receipt parser: every article with weight and unit, discounts, deposits, VAT rate; deposit returns, payments, total savings and receipt data (`analytics.parse_receipt`). Weight lines are no second purchase anymore. Cached receipts are parsed again automatically
-- Stores, offers and leaflets (no login): `search_stores()`, `store_offers()`, `sync_offers()`, `leaflets()`, `leaflet()`, `sync_leaflets()`, kept in the cache as history; CLI commands `stores`, `offers`, `leaflets`, `sync --store/--leaflets`
+- Stores, offers and leaflets (no login): `search_stores()`, `store()`, `store_offers()`, `sync_offers()`, `leaflets()`, `leaflet()`, `leaflet_region()`, `sync_leaflets()`, kept in the cache as history; the regional variants of the weekly leaflets for the offer region of a store; CLI commands `stores`, `offers`, `leaflets`, `sync --store/--leaflets`
 - New module `lidlplus.export` and CLI command `export`: CSV (for German spreadsheets), JSON or ZIP with every table and the complete cache
 - New analytics: `product_summary()`, `total_savings()`, `savings_by_month()`, `category_spending()`, `visited_stores()`, `search_leaflets()`
 - The cache is written to disk (fsync) before it replaces the old file, syncs running at the same time wait for each other instead of overwriting each other's changes, offers and leaflets are only saved when something changed

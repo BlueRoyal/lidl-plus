@@ -86,6 +86,7 @@ def get_arguments():
     leaflets = subparser.add_parser("leaflets", help="show the current and upcoming leaflets as json")
     leaflets.set_defaults(func=print_leaflets)
     leaflets.add_argument("--search", metavar="TEXT", help="search the pages and products of these leaflets")
+    leaflets.add_argument("--store", metavar="KEY", help="the regional leaflets of the offer region of this store")
     export_parser = subparser.add_parser("export", help="export the cache as CSV, JSON or ZIP")
     export_parser.set_defaults(func=export_cache)
     export_parser.add_argument(
@@ -211,7 +212,9 @@ def sync_cache(args):
     if args.get("store"):
         print(f"{lidl_plus.sync_offers(args['store'])} new offer(s) added to cache.")
     if args.get("leaflets"):
-        print(f"{lidl_plus.sync_leaflets()} new leaflet(s) added to cache.")
+        # The regional leaflets of the first store, the national ones without store
+        region = (lidl_plus.leaflet_region(args["store"][0]) or {}).get("region") if args.get("store") else None
+        print(f"{lidl_plus.sync_leaflets(region=region)} new leaflet(s) added to cache.")
 
 
 def public_api(args):
@@ -242,7 +245,9 @@ def print_offers(args):
 def print_leaflets(args):
     """print the current and upcoming leaflets, or the pages and products that match the search"""
     lidl_plus = public_api(args)
-    leaflets = analytics.leaflet_overview(lidl_plus.leaflets())
+    # The weekly leaflets differ between the offer regions
+    region = (lidl_plus.leaflet_region(args["store"]) or {}).get("region") if args.get("store") else None
+    leaflets = analytics.leaflet_overview(lidl_plus.leaflets(region))
     for leaflet in leaflets:
         leaflet["status"] = analytics.leaflet_status(leaflet)
     leaflets = [leaflet for leaflet in leaflets if leaflet["status"] != "expired"]
@@ -251,7 +256,7 @@ def print_leaflets(args):
         return
     for leaflet in leaflets:
         if leaflet["identifier"]:
-            leaflet.update(analytics.leaflet_details(lidl_plus.leaflet(leaflet["identifier"])))
+            leaflet.update(analytics.leaflet_details(lidl_plus.leaflet(leaflet["identifier"], region)))
     print(json.dumps(analytics.search_leaflets(leaflets, args["search"]), indent=4, ensure_ascii=False))
 
 

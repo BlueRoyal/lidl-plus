@@ -61,6 +61,9 @@ class LidlPlusApi:  # pylint: disable=too-many-instance-attributes,too-many-publ
     _LEAFLETS_API = "https://endpoints.leaflets.schwarz/v4"
     # Upcoming leaflets may still be incomplete and are loaded again after this time
     _LEAFLET_RELOAD_INTERVAL = timedelta(hours=20)
+    # The public store directory of lidl.de tells the offer region of a store, it is checked again after this time
+    _STORE_DIRECTORY = "https://www.lidl.de/s/de-DE/filialen"
+    _OFFER_REGION_RECHECK = timedelta(days=30)
     _APP = "com.lidlplus.app"
     _OS = "iOs"
     _TIMEOUT = 120
@@ -575,22 +578,86 @@ class LidlPlusApi:  # pylint: disable=too-many-instance-attributes,too-many-publ
         response.raise_for_status()
         return response.json()
 
-    def leaflets(self):
+    def leaflets(self, region=None):
         """
         All leaflets published for the country: the weekly leaflet of the current and the next weeks,
-        special leaflets and more, as returned by the leaflet API (grouped in categories)
+        special leaflets and more, as returned by the leaflet API (grouped in categories).
+
+        The weekly leaflets differ between the offer regions (see leaflet_region), without region the
+        national leaflets are returned.
         """
         # The locale has to look exactly like "lidl/de-DE", other formats are rejected
-        params = {"client_locale": f"lidl/{self._language}-{self._country}", "region_id": 0}
+        params = {"client_locale": f"lidl/{self._language}-{self._country}", "region_id": region or 0}
         return self._leaflet_get("overview", params)
 
-    def leaflet(self, identifier):
+    def leaflet(self, identifier, region=None):
         """A single leaflet with pages (image, text) and products, identifier like "aktionsprospekt-...-321560" """
-        return (self._leaflet_get("flyer", {"flyer_identifier": identifier, "region_id": 0}) or {}).get("flyer") or {}
+        params = {"flyer_identifier": identifier, "region_id": region or 0}
+        return (self._leaflet_get("flyer", params) or {}).get("flyer") or {}
 
-    def sync_leaflets(self, categories=None):
+    def store(self, store_key):
+        """Address, position and province of a store, store_key like "DE1234" """
+        return self._public_get(f"{self._STORES_API}/v1/{self._country}/{store_key}")
+
+    def _directory_page(self, path):
+        """Data of a page of the store directory of lidl.de, None if the page does not exist"""
+        headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0 (compatible; lidl-plus)"}
+        response = self._session.get(
+            f"{self._STORE_DIRECTORY}/{path}/_payload.json", headers=headers, timeout=self._TIMEOUT
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+
+    def _lookup_offer_region(self, store_key):
+        """(region, name) of a store from the store directory of lidl.de (only Germany), None if it is not listed"""
+        if self._country != "DE":
+            return None
+        number = int(re.sub(r"\D", "", store_key) or 0)
+        store = self.store(store_key) or {}
+        city = str(store.get("locality") or "")
+        paths = [analytics.url_slug(city)]
+        state = self._directory_page(analytics.url_slug(store.get("province"))) if store.get("province") else None
+        # The directory names cities shorter at times, e.g. "Frankfurt" for "Frankfurt am Main"
+        for entry in analytics.nuxt_objects(state, "name", "url"):
+            name = str(entry["name"] or "")
+            if name and (city.lower() == name.lower() or city.lower().startswith(name.lower() + " ")):
+                paths.append(str(entry["url"]).rstrip("/").split("/filialen/", 1)[-1])
+        for path in dict.fromkeys(filter(None, paths)):
+            for object_number, region in analytics.store_offer_regions(self._directory_page(path)).items():
+                if int(re.sub(r"\D", "", object_number) or -1) == number:
+                    return region
+        return None
+
+    def leaflet_region(self, store_key):
         """
-        Add the leaflets to the cache with their pages and products (of all categories or only the given ones).
+        Offer region of a store like {"region": 10, "name": "Grevenbroich"}: the weekly leaflets differ between
+        the regions. Taken from the store directory of lidl.de (only Germany) and kept in the cache for 30 days.
+        None if it is not known, then the national leaflets are used.
+        """
+        with self._cache_lock:
+            cache = self._load_cache()
+            known = (cache.get("leaflet_regions") or {}).get(store_key)
+            checked = analytics.parse_datetime((known or {}).get("checked"))
+            now = datetime.now(timezone.utc)
+            if not checked or now - checked >= self._OFFER_REGION_RECHECK:
+                try:
+                    region = self._lookup_offer_region(store_key)
+                except (requests.RequestException, ValueError, TypeError, AttributeError, KeyError) as exc:
+                    # Tried again with the next sync, the region found before stays valid
+                    _LOGGER.warning("Could not find the offer region of store %s: %s", store_key, exc)
+                else:
+                    known = {"region": region[0] if region else None, "name": region[1] if region else ""}
+                    known["checked"] = now.isoformat()
+                    cache.setdefault("leaflet_regions", {})[store_key] = known
+                    self._save_cache(cache)
+            return known if known and known.get("region") is not None else None
+
+    def sync_leaflets(self, categories=None, region=None):
+        """
+        Add the leaflets to the cache with their pages and products (of all categories or only the given ones),
+        with the regional weekly leaflets of an offer region (see leaflet_region) or the national ones.
         Leaflets are never removed from it. Returns the number of leaflets that were not in the cache before.
         """
         with self._cache_lock:
@@ -599,7 +666,7 @@ class LidlPlusApi:  # pylint: disable=too-many-instance-attributes,too-many-publ
             now = datetime.now(timezone.utc)
             added = 0
             changed = bool(cache.get("upgraded"))
-            for leaflet in analytics.leaflet_overview(self.leaflets()):
+            for leaflet in analytics.leaflet_overview(self.leaflets(region)):
                 if not leaflet["id"]:
                     continue
                 entry = archive.get(leaflet["id"])
@@ -608,16 +675,16 @@ class LidlPlusApi:  # pylint: disable=too-many-instance-attributes,too-many-publ
                     added += 1
                 changed |= self._update_archived(entry, "leaflet", leaflet, now.isoformat())
                 if self._leaflet_details_outdated(entry, categories, now):
-                    changed |= self._load_leaflet_details(entry, now)
+                    changed |= self._load_leaflet_details(entry, now, region)
             if changed:
                 self._save_cache(cache)
             return added
 
-    def _load_leaflet_details(self, entry, now):
+    def _load_leaflet_details(self, entry, now, region=None):
         """Load pages and products of a leaflet, True if they were stored"""
         leaflet = entry["leaflet"]
         try:
-            details = analytics.leaflet_details(self.leaflet(leaflet["identifier"]))
+            details = analytics.leaflet_details(self.leaflet(leaflet["identifier"], region))
         except (requests.RequestException, ValueError, TypeError, AttributeError, KeyError) as exc:
             # Tried again with the next sync
             _LOGGER.warning("Could not load leaflet %s: %s", leaflet["identifier"], exc)
@@ -655,9 +722,13 @@ class LidlPlusApi:  # pylint: disable=too-many-instance-attributes,too-many-publ
         outdated = loaded is None or now - loaded >= cls._LEAFLET_RELOAD_INTERVAL
         return entry.get("details_status") == "upcoming" and status != "expired" and outdated
 
-    def cached_leaflets(self, today=None):
-        """All leaflets in the cache, see analytics.archived_leaflets (today: local date for the status)"""
-        return analytics.archived_leaflets(self._load_cache().get("leaflets"), today)
+    def cached_leaflets(self, today=None, region=None):
+        """
+        The leaflets in the cache (see analytics.archived_leaflets, today: local date for the status):
+        with a region the ones of this offer region (see analytics.leaflets_of_region), otherwise all
+        """
+        leaflets = analytics.archived_leaflets(self._load_cache().get("leaflets"), today)
+        return analytics.leaflets_of_region(leaflets, region) if region is not None else leaflets
 
     # --- Analytics ---
 

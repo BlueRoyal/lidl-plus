@@ -30,6 +30,7 @@ from .const import (
     KEY_FREQUENTLY_BOUGHT,
     KEY_LAST_ERROR,
     KEY_LAST_SYNC,
+    KEY_LEAFLET_REGION,
     KEY_OFFER_STORES,
     KEY_PRICE_CHANGES,
     KEY_PRODUCTS,
@@ -440,7 +441,13 @@ class StoresView(LidlPlusView):
         if (entry := self._entry(request)) is None:
             return self._not_found()
         data = entry.runtime_data.data
-        return self.json({"visited": data[KEY_STORES], "offer_stores": data[KEY_OFFER_STORES]})
+        return self.json(
+            {
+                "visited": data[KEY_STORES],
+                "offer_stores": data[KEY_OFFER_STORES],
+                "leaflet_region": data.get(KEY_LEAFLET_REGION),
+            }
+        )
 
 
 class ExportView(LidlPlusView):

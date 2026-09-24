@@ -390,6 +390,7 @@ async def test_diagnostics(hass: HomeAssistant, api_state: FakeApiState, config_
         "leaflets": 2,
         "leaflets_without_products": 0,
     }
+    assert diagnostics["leaflet_region_known"] is False
     dump = json.dumps(diagnostics)
     for private in ("rotated-token", LOYALTY_ID, "Lidl Musterstadt", "Lidl Nord", '"t1"'):
         assert private not in dump

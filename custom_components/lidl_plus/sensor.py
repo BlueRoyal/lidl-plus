@@ -33,6 +33,7 @@ from .const import (
     KEY_FREQUENTLY_BOUGHT,
     KEY_LAST_ERROR,
     KEY_LAST_SYNC,
+    KEY_LEAFLET_REGION,
     KEY_LEAFLETS,
     KEY_LOG,
     KEY_LOYALTY_ID,
@@ -451,7 +452,11 @@ SENSOR_DESCRIPTIONS: tuple[LidlPlusSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:newspaper-variant-multiple",
         value_fn=lambda d: len(d[KEY_LEAFLETS]),
-        attrs_fn=lambda d: {"leaflets": [_leaflet_summary(leaflet) for leaflet in d[KEY_LEAFLETS]]},
+        attrs_fn=lambda d: {
+            "leaflets": [_leaflet_summary(leaflet) for leaflet in d[KEY_LEAFLETS]],
+            # The weekly leaflets differ between the offer regions of Lidl
+            "region": (d.get(KEY_LEAFLET_REGION) or {}).get("name"),
+        },
     ),
 )
 

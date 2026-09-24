@@ -103,6 +103,7 @@ LEAFLET_COLUMNS = [
     "description",
     "url",
     "pdf",
+    "regions",
 ]
 
 
@@ -204,6 +205,8 @@ def leaflet_rows(leaflets):
             "end": leaflet.get("end"),
             "status": leaflet.get("status"),
             "pdf": leaflet.get("pdf"),
+            # Offer regions of this variant of the leaflet, "0" is the national one
+            "regions": ", ".join(leaflet.get("regions") or []),
         }
         for product in leaflet.get("products") or []:
             rows.append(

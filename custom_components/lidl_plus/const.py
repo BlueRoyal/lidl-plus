@@ -47,6 +47,8 @@ KEY_OFFERS_CURRENT = "offers_current"
 KEY_OFFERS_UPCOMING = "offers_upcoming"
 KEY_OFFERS_FOR_YOU = "offers_for_you"
 KEY_LEAFLETS = "leaflets"
+# Offer region whose weekly leaflets are shown, the leaflets differ from region to region
+KEY_LEAFLET_REGION = "leaflet_region"
 # Changes with every update of the data, also when only offers or leaflets changed
 KEY_DATA_VERSION = "data_version"
 
