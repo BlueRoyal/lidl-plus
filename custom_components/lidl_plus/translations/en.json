@@ -1,0 +1,135 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Lidl Plus",
+        "description": "Get a refresh token with the command line tool: `lidl-plus --language=de --country=DE --user=you@example.com auth`",
+        "data": {
+          "country": "Country code (e.g. DE)",
+          "language": "Language code (e.g. de)",
+          "refresh_token": "Refresh token"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Renew the Lidl Plus login",
+        "description": "Lidl Plus rejected the refresh token of {title}. Get a new one with `lidl-plus ... auth` and enter it here.",
+        "data": {
+          "refresh_token": "Refresh token"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Lidl Plus",
+        "description": "Leave the refresh token empty to keep the current one.",
+        "data": {
+          "country": "Country code (e.g. DE)",
+          "language": "Language code (e.g. de)",
+          "refresh_token": "New refresh token (optional)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "The refresh token is invalid or expired. Please get a new one.",
+      "invalid_country": "No Lidl Plus account found for this country. Please check the country code.",
+      "cannot_connect": "Could not connect to Lidl Plus. Please try again later.",
+      "unknown": "Unexpected error, see the log for details."
+    },
+    "abort": {
+      "already_configured": "This Lidl Plus account is already configured, its refresh token was updated.",
+      "reauth_successful": "The Lidl Plus login was renewed.",
+      "reconfigure_successful": "The configuration was updated.",
+      "wrong_account": "The refresh token belongs to a different Lidl Plus account."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Stores for the offers",
+        "description": "Choose the stores whose current and upcoming offers are loaded. Without a selection the store you visit most is used.",
+        "data": {
+          "offer_stores": "Stores",
+          "search": "Search further stores"
+        },
+        "data_description": {
+          "search": "City, postal code or street. The stores found are added to the list, select them and save."
+        }
+      }
+    },
+    "error": {
+      "no_stores": "No store found, please try another city, postal code or street.",
+      "cannot_connect": "Could not connect to Lidl Plus. Please try again later."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "current_month_spending": { "name": "Current month spending" },
+      "average_basket": { "name": "Average basket" },
+      "shopping_frequency_days": { "name": "Shopping frequency" },
+      "category_food_spending": { "name": "Food category spending" },
+      "category_nonfood_spending": { "name": "Non-food category spending" },
+      "total_tickets": { "name": "Total receipts" },
+      "new_tickets_last_sync": { "name": "New receipts last sync" },
+      "coupons_available": { "name": "Coupons available" },
+      "coupons_activated": { "name": "Coupons activated" },
+      "price_changes_count": { "name": "Price changes detected" },
+      "restock_suggestions_count": { "name": "Restock suggestions" },
+      "spending_by_month": { "name": "Spending by month" },
+      "spending_by_store": { "name": "Top store" },
+      "frequently_bought": { "name": "Most bought item" },
+      "products": { "name": "Products" },
+      "receipts": { "name": "Receipts" },
+      "last_receipt": { "name": "Last purchase" },
+      "last_error": { "name": "Last error" },
+      "log": { "name": "Log" },
+      "last_sync": { "name": "Last sync" },
+      "loyalty_id": { "name": "Loyalty ID" },
+      "savings_total": { "name": "Savings" },
+      "savings_current_month": { "name": "Savings current month" },
+      "offers_current": { "name": "Current offers" },
+      "offers_upcoming": { "name": "Upcoming offers" },
+      "offers_for_you": { "name": "Offers for articles you bought" },
+      "leaflets": { "name": "Leaflets" }
+    }
+  },
+  "selector": {
+    "dataset": {
+      "options": {
+        "all": "Everything (ZIP file)",
+        "receipts": "Receipts",
+        "items": "Articles of all receipts",
+        "products": "Products with statistics",
+        "offers": "Offers",
+        "leaflets": "Leaflet products"
+      }
+    },
+    "format": {
+      "options": {
+        "csv": "CSV (spreadsheet)",
+        "json": "JSON"
+      }
+    }
+  },
+  "services": {
+    "sync": {
+      "name": "Sync receipts",
+      "description": "Fetches new receipts, coupons, offers, leaflets and statistics from Lidl Plus immediately."
+    },
+    "activate_all_coupons": {
+      "name": "Activate all coupons",
+      "description": "Activates every currently valid coupon of all configured Lidl Plus accounts."
+    },
+    "export": {
+      "name": "Export data",
+      "description": "Writes the receipts, articles, offers and leaflets of every Lidl Plus account to files in the folder lidl_plus_export of the configuration.",
+      "fields": {
+        "dataset": {
+          "name": "Data",
+          "description": "What to export, everything is written to a ZIP file with a CSV file per table and all raw data."
+        },
+        "format": {
+          "name": "Format",
+          "description": "File format of a single table, CSV opens in spreadsheet programs."
+        }
+      }
+    }
+  }
+}

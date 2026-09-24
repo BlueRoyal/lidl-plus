@@ -1,8 +1,21 @@
 .idea/
+.vscode/
 __pycache__/
+*.py[cod]
+build/
 dist/
 venv/
-*.json
-*.log
+.venv/
 **/*.egg-info/
+.pytest_cache/
+.mypy_cache/
+node_modules/
+*.log
 test.py
+
+# Receipt caches and exported data contain personal purchase data
+*_cache.json
+*_cache.json.corrupt*
+
+# Local tool settings
+.claude/settings.local.json

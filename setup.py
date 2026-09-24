@@ -11,9 +11,9 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 setup(
     name="lidl-plus",
-    version="0.4.0",
+    version="0.5.0",
     author="Andre Basche, Marcel Bartholome",
-    description="Fetch receipts and more from Lidl Plus",
+    description="Fetch receipts, offers and leaflets from Lidl Plus",
     long_description=long_description,
     long_description_content_type="text/markdown",
     project_urls={
@@ -27,18 +27,18 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Natural Language :: English",
         "Operating System :: OS Independent",
-        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Programming Language :: Python :: 3.14",
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
     platforms="any",
-    packages=find_packages(),
+    packages=find_packages(include=["lidlplus", "lidlplus.*"]),
     include_package_data=True,
-    python_requires=">=3.8",
+    python_requires=">=3.9",
     install_requires=[
         "requests>=2.28.1",
     ],

@@ -12,8 +12,8 @@
 
 This repository provides two things:
 
-- **Python library & CLI** — fetch receipts, analytics and coupons from the Lidl Plus API
-- **Home Assistant custom integration** — 20+ sensors, a sidebar panel with charts, receipt browser and product tracker
+- **Python library & CLI** — fetch receipts with every detail, analytics, coupons, the offers of your store and the leaflets (Prospekte), export everything as CSV, JSON or ZIP
+- **Home Assistant custom integration** — 25+ sensors, a sidebar panel with charts, receipt browser, product tracker, offers and leaflets, a REST API for AI assistants and other programs
 
 ## Installation
 ```bash
@@ -81,8 +81,16 @@ ticket = lidl.ticket("TICKET_ID")
 
 # Parse items as structured list
 items = lidl.parse_ticket_items(ticket)
-# [{"id": "0082052", "name": "Feldsalat", "unit_price": "1,49", "quantity": 1, "tax_type": "A"}, ...]
+# [{"id": "0082052", "name": "Feldsalat", "unit_price": "1,49", "quantity": 1.0, "unit": "", "total": 1.49,
+#   "discounts": [{"text": "Lidl Plus Rabatt", "amount": -0.3}], "discount": -0.3, "tax_type": "A", "tax_rate": 7.0,
+#   "is_deposit": False}, ...]
+
+# Everything else the receipt contains: deposit returns, VAT, payments, total savings, till and receipt number
+from lidlplus import analytics
+receipt = analytics.parse_receipt(ticket["htmlPrintedReceipt"])
 ```
+
+Weighed articles have their weight as `quantity` and `"unit": "kg"`, discounts (Lidl Plus coupons, price advantages) belong to the article above them, so `total + discount` is what was paid for a line.
 
 ### Cache & Analytics
 
@@ -137,6 +145,10 @@ freq = lidl.shopping_frequency_days()
 restock = lidl.restock_suggestions(min_purchases=3)
 ```
 
+The calculations are also available as pure functions in `lidlplus.analytics` (e.g. `analytics.spending_by_month(tickets)`, `analytics.product_summary(items)`, `analytics.total_savings(items)`), so a list of tickets only has to be loaded once.
+
+The cache keeps the HTML of every receipt. When a newer version parses receipts better, the cached receipts are parsed again automatically, nothing has to be downloaded again.
+
 ### Coupons
 
 ```bash
@@ -154,7 +166,57 @@ lidl = LidlPlusApi("de", "DE", refresh_token="XXXXXXXXXX")
 for section in lidl.coupons()["sections"]:
     for coupon in section["coupons"]:
         print(coupon["title"], coupon["id"])
+
+# Activate all currently valid coupons (API v1 and v2)
+result = lidl.activate_all_coupons()  # {"activated": [...titles], "failed": [...titles]}
 ```
+
+The auth server may replace the refresh token when the access token is renewed. Always store `lidl.refresh_token` after using the API, the old token can be invalid afterwards.
+
+### Offers and leaflets
+
+Stores, their offers (the ones of the Lidl Plus app, current and announced) and the leaflets are public, no login is needed.
+
+```bash
+# Find the key of your store
+lidl-plus stores "Musterstadt"
+# DE1234  Musterstadt  Hauptstraße 1, 12345 Musterstadt
+
+# Current and upcoming offers of the store
+lidl-plus offers DE1234
+
+# Current and upcoming leaflets (PDF and online links), or search their pages and products
+lidl-plus leaflets
+lidl-plus leaflets --search "Kaffee"
+
+# Keep a history of all offers and leaflets in the cache
+lidl-plus --language=de --country=DE --refresh-token=XXXXX --cache lidlplus_cache.json sync --store DE1234 --leaflets
+```
+
+```python
+from lidlplus import LidlPlusApi, analytics
+
+lidl = LidlPlusApi("de", "DE", cache_file="lidlplus_cache.json")
+offers = [analytics.normalize_offer(offer) for offer in lidl.store_offers("DE1234")]
+
+lidl.sync_offers(["DE1234"])   # offers are never removed from the cache
+lidl.sync_leaflets()           # leaflets with the text of their pages and their products
+upcoming = [leaflet for leaflet in lidl.cached_leaflets() if leaflet["status"] == "upcoming"]
+analytics.search_leaflets(lidl.cached_leaflets(), "kaffee")
+```
+
+Food offers are no products of a leaflet, they are only found by the text of their page. Leaflets are often published before they are complete, so upcoming leaflets are loaded again once a day until their offers start. The products of a leaflet are articles of the Lidl online shop, their IDs differ from the article numbers on the receipts. A leaflet with pages and products takes about 200 KB in the cache, so the cache grows by roughly 10–15 MB per year.
+
+### Export
+
+```bash
+lidl-plus --cache lidlplus_cache.json export lidl.zip          # every table as CSV and the complete cache
+lidl-plus --cache lidlplus_cache.json export items.csv         # all articles of all receipts
+lidl-plus --cache lidlplus_cache.json export products.json     # the file name selects the table
+lidl-plus --cache lidlplus_cache.json export bons.csv --dataset receipts
+```
+
+Tables: `receipts`, `items` (every article line with discounts), `products` (statistics per article), `offers` and `leaflets` (products of the leaflets). CSV files use semicolons, decimal commas and UTF-8 with BOM, so they open correctly in Excel and LibreOffice with German settings. In Python: `lidlplus.export.export_file(lidl.cached_data(), "items", "csv")`.
 
 ## CLI Reference
 ```
@@ -177,8 +239,13 @@ commands:
   id                        show loyalty ID
   receipt                   output last receipt as json
   coupon                    list or activate coupons
-  sync                      sync new tickets to cache (requires --cache)
+  sync                      sync new tickets to cache (requires --cache),
+                            --store KEY also saves the offers of a store, --leaflets the leaflets
   stats                     show analytics from cache (requires --cache)
+  stores                    search stores by city, postal code or street (no login)
+  offers                    current and announced offers of a store as json (no login)
+  leaflets                  current and upcoming leaflets as json, --search TEXT (no login)
+  export                    export the cache as CSV, JSON or ZIP (requires --cache)
 ```
 
 ## Home Assistant Integration
@@ -186,31 +253,140 @@ commands:
 A fully featured Home Assistant custom integration is included in `custom_components/lidl_plus/`.
 
 ### Features
-- **20+ sensors**: spending by month, average basket, food/non-food categories, coupons, price changes, restock suggestions, last receipt, loyalty ID, and more
-- **Sidebar panel** with three tabs:
-  - **Übersicht**: KPI cards, monthly spending bar chart, food/non-food donut chart, top stores chart
-  - **Kassenbons**: all receipts with full item details, filter by store, date range, amount
-  - **Artikel**: all products with purchase stats, price trend badges, filter by trend/period, detail modal with price history line chart
-- **Services**: `lidl_plus.sync` (force refresh), `lidl_plus.activate_all_coupons`
-- Data auto-refreshes every 6 hours; panel updates on each sync
+- **25+ sensors**: spending by month, average basket, food/non-food categories, savings, coupons, price changes, restock suggestions, current and upcoming offers, offers for articles you bought before, leaflets, last receipt, loyalty ID, and more (names in English and German)
+- **Sidebar panel**, added automatically, with five tabs (and an account selector if several accounts are set up):
+  - **Übersicht**: KPI cards, monthly spending and savings chart, food/non-food donut chart, top stores chart
+  - **Kassenbons**: all receipts with every article, weight, discount, deposit, deposit return and payment; filter by store, date range, amount
+  - **Artikel**: all products with purchase stats, savings, price trend badges, filter by trend/period, detail modal with price history line chart
+  - **Angebote**: current and upcoming offers of your stores, marked if you bought the article before
+  - **Prospekte**: current and upcoming leaflets with PDF, pages and products, and a search across leaflets, offers and your purchases
+  - **Export** button: download everything as ZIP or a single table as CSV
+- **Offers and leaflets are kept**: every offer and leaflet seen stays in the cache, also after it ended
+- **REST API** for AI assistants and other programs, see below
+- **Services**: `lidl_plus.sync` (force refresh), `lidl_plus.activate_all_coupons` (returns the activated coupons), `lidl_plus.export` (writes the data to `/config/lidl_plus_export/`, e.g. for a weekly automation)
+- **Configure** chooses the stores whose offers are loaded (from your receipts or by searching a city, postal code or street), without a choice the store you visit most is used
+- **Re-authentication**: if Lidl rejects the refresh token, Home Assistant asks for a new one. Country, language and token can be changed with *Reconfigure*
+- Refresh tokens replaced by the auth server are saved automatically, several Lidl Plus accounts can be added
+- Data auto-refreshes every 6 hours. If Lidl cannot be reached, the receipts from the local cache are shown and the error appears in the *Last error* sensor
+- The panel loads its data through the authenticated Home Assistant websocket API and works without internet access (Chart.js and Tailwind are included)
+
+Requires Home Assistant 2025.3 or newer.
 
 ### Setup
-1. Copy `custom_components/lidl_plus/` to your HA `/config/custom_components/` directory
-2. Copy `www/lidl_plus/` to your HA `/config/www/` directory
-3. Add to `configuration.yaml`:
-   ```yaml
-   panel_custom:
-     - name: lidl-plus-panel-element
-       sidebar_title: Lidl Plus
-       sidebar_icon: mdi:cart
-       url_path: lidl-plus
-       module_url: /local/lidl_plus/panel.js
-   ```
-4. Restart Home Assistant
-5. Go to **Settings → Devices & Services → Add Integration** and search for *Lidl Plus*
-6. Enter your refresh token (obtain via `lidl-plus auth` CLI command)
+1. Install the integration
+   - **HACS**: add this repository as custom repository (type *Integration*) and install *Lidl Plus*, or
+   - **manually**: copy `custom_components/lidl_plus/` to your HA `/config/custom_components/` directory
+2. Restart Home Assistant
+3. Go to **Settings → Devices & Services → Add Integration** and search for *Lidl Plus*
+4. Enter country, language and your refresh token (obtain via `lidl-plus auth` CLI command)
+
+The *Lidl Plus* panel appears in the sidebar, no `configuration.yaml` changes are needed.
+
+### REST API for AI assistants
+
+All data of the integration can be read with a Home Assistant access token, e.g. by your own bot or an AI assistant. The API only reads, it cannot activate coupons or change anything.
+
+1. Create a user for the assistant (*Settings → People → Users*, no administrator) and log in with it once
+2. In its profile (*Security → Long-lived access tokens*) create a token
+3. Send it with every request: `Authorization: Bearer <token>`
+
+```bash
+TOKEN=eyJhbGciOi...
+curl -H "Authorization: Bearer $TOKEN" http://homeassistant.local:8123/api/lidl_plus/summary
+curl -H "Authorization: Bearer $TOKEN" "http://homeassistant.local:8123/api/lidl_plus/search?q=kaffee"
+curl -H "Authorization: Bearer $TOKEN" -OJ "http://homeassistant.local:8123/api/lidl_plus/export?dataset=all"
+```
+
+| Endpoint (below `/api/lidl_plus`) | Content |
+|---|---|
+| `/openapi.json` | OpenAPI 3.1 description of all endpoints, most AI tools turn it into functions directly |
+| `/summary` | key figures: spending, savings, most bought articles, price changes, restock suggestions, number of coupons and offers |
+| `/search?q=kaffee` | articles bought before, offers and leaflet pages and products that contain every word |
+| `/receipts?from=2026-09-01&to=2026-09-30&items=true` | receipts, optionally with their articles; `store=`, `search=`, `limit=`, `offset=` |
+| `/receipts/{id}` | a receipt with all details |
+| `/products?search=milch&sort=spent` | articles with statistics and price history |
+| `/products/{id}` | an article with every purchase and all its offers |
+| `/spending?from=2026-01-01&to=2026-06-30` | spending and savings of a period by month, store and category |
+| `/offers?status=upcoming` | offers: `active` (default), `current`, `upcoming`, `expired`, `all`; `bought=true` for articles bought before |
+| `/leaflets`, `/leaflets/{id}` | leaflets (same `status` values), a single one with the text of every page and its products |
+| `/coupons`, `/stores`, `/accounts` | coupons, stores of the receipts and of the offers, configured accounts (`entry_id=` selects the account) |
+| `/export?dataset=items&format=csv` | download: `all` (ZIP), `receipts`, `items`, `products`, `offers`, `leaflets` as CSV or JSON |
+
+A Home Assistant token allows everything its user may do in Home Assistant, not only reading this API. Give the assistant its own user without administrator rights and delete the token when it is not needed anymore.
+
+### Updating from 1.1.0
+The update does not delete any data:
+- **Before updating**, create a backup (*Settings → System → Backups*). If you changed files in `/config/custom_components/lidl_plus/`, keep a copy of that folder outside of `custom_components/`, the update replaces it.
+- The receipt cache `/config/lidl_plus_cache.json` is **copied** to `/config/.storage/lidl_plus_cache_<entry>.json`. The old file stays as backup, so version 1.1.0 still works with it if you go back.
+- `/config/www/lidl_plus/data.json` is moved to `/config/.storage/lidl_plus_panel_data_backup.json`, because files in `www/` can be downloaded **without login**. The other files in `/config/www/lidl_plus/` are not used anymore and can be removed once the new panel works.
+- Remove the `panel_custom` entry of the Lidl Plus panel from `configuration.yaml`. The integration registers the panel itself now; until the entry is removed it replaces the old panel and logs a warning.
+- Entity IDs, their history and statistics stay the same. The sensor names follow the Home Assistant language now. Country, language and token are changed with *Reconfigure*, *Configure* chooses the stores for the offers.
+- The receipts in the cache are parsed again with all details (discounts, weights, deposits, payments) on the first start, the cache keeps the HTML of every receipt, so nothing has to be downloaded again.
+
+Removing the integration keeps the receipt cache as `/config/.storage/lidl_plus_removed_<account>.json`; adding the same account again continues with it. Delete the file if you do not need the receipts anymore.
+
+## Development
+```bash
+pip install -r requirements.txt -r requirements_dev.txt
+pytest                                  # library and command line tool
+pip install -r requirements_test_ha.txt
+pytest                                  # additionally the Home Assistant integration (Linux/macOS)
+cd tests/frontend && npm ci && npm test # the sidebar panel (panel.js and index.html) with jsdom
+```
+
+`custom_components/lidl_plus/_lidlplus/` contains a copy of `api.py`, `analytics.py`, `exceptions.py` and `export.py` for Home Assistant. Change the files in `lidlplus/` and copy them over, `tests/test_vendored_copy.py` fails if they differ.
 
 ## Changelog
+
+### 1.2.0 — Home Assistant integration (2026-09-24)
+**New**
+- Every detail of the receipts: discounts, weights, deposits and deposit returns, payment methods, savings and Lidl Plus points; food/non-food by the VAT rates of the receipt; sensors for the savings
+- Offers of the chosen stores (current and announced) and leaflets with their pages and products, all of them kept in the cache as history; sensors for current, upcoming and "bought before" offers and for the leaflets; *Configure* chooses the stores
+- Panel tabs *Angebote* and *Prospekte* with a search across leaflets, offers and your purchases; export button (ZIP or CSV)
+- REST API with OpenAPI description for AI assistants and other programs (`/api/lidl_plus/...`, authentication with an access token)
+- Service `lidl_plus.export`
+
+**Security & robustness**
+- The panel no longer loads `/local/lidl_plus/data.json`. Everything in `www/` is served without authentication, so all receipts could be downloaded by anyone who can reach Home Assistant. The data now comes through an authenticated websocket command and the old file is moved out of `www/` on startup
+- `manifest.json`, `strings.json` and the translations were excluded by `.gitignore` (`*.json`) and missing in the repository
+- Refresh tokens replaced by the auth server are saved to the config entry, before the token of the initial setup was used again after every restart. The config flow stores the token returned by the validation
+- A rejected refresh token starts a re-authentication; new *Reconfigure* flow. The old options flow failed on current Home Assistant (`config_entry` is read-only), *Configure* now chooses the stores for the offers
+- Receipt cache per config entry in `.storage/`, written atomically; the progress of an interrupted sync is kept. Files of older versions are copied or moved, never deleted; removing the integration keeps the cache for the account
+- Sensor states longer than 255 characters (error message, log) are shortened instead of becoming `unknown`; large attribute lists are excluded from the recorder database
+- Diagnostics no longer contain the loyalty ID, store names and receipt IDs
+- Chart.js and Tailwind are shipped with the integration instead of being loaded from CDNs: the panel works without internet access, and no third-party code runs in the origin of Home Assistant, where it could reach the login of the user
+- If Lidl cannot be reached, the receipts from the cache are used, also at startup (before all sensors were unavailable until Lidl answered)
+- A receipt that cannot be loaded no longer stops the sync of all newer receipts
+- Refresh tokens that are replaced during a failed validation in the config flow are kept (e.g. after a typo in the country code)
+
+**Features & fixes**
+- The integration registers the panel and serves its files (no `panel_custom`, no copying to `www/`), HACS support. The panel stays while an entry is reloaded or cannot be set up
+- Panel height fixed for the frontend since HA 2026.8, where `ha-panel-custom` has no height anymore and the panel collapsed to 150 px
+- Panel shows all receipts (before only the last 50, which made the receipt count, total spending and category chart wrong), also receipts with a negative total (deposit returns only), German number format, banner for failed syncs, menu button with the same rule as the built-in panels (small screens, "always hide sidebar", not in kiosk mode), receipt table fits on phones
+- The panel only loads the receipt and product lists again after a new sync, not every 5 minutes; a failing chart no longer hides the other tabs
+- Several Lidl Plus accounts with an account selector in the panel, the loyalty ID is the unique ID now. Adding a configured account again replaces its token and reloads it, also after a failed setup
+- Sensor names in English and German, diagnostic sensors categorized, `last_reset` for the monthly spending sensors
+- The *Receipts* sensor counts all receipts (before at most 50, its attribute still lists the last 50), the loyalty ID has no quotes anymore
+- `lidl_plus.activate_all_coupons` skips expired and not yet valid coupons and returns the activated coupons
+- The cache file is read twice per update instead of 16 times
+
+### 0.5.0 — Python library (2026-09-24)
+- New receipt parser: every article with weight and unit, discounts, deposits, VAT rate; deposit returns, payments, total savings and receipt data (`analytics.parse_receipt`). Weight lines are no second purchase anymore. Cached receipts are parsed again automatically
+- Stores, offers and leaflets (no login): `search_stores()`, `store_offers()`, `sync_offers()`, `leaflets()`, `leaflet()`, `sync_leaflets()`, kept in the cache as history; CLI commands `stores`, `offers`, `leaflets`, `sync --store/--leaflets`
+- New module `lidlplus.export` and CLI command `export`: CSV (for German spreadsheets), JSON or ZIP with every table and the complete cache
+- New analytics: `product_summary()`, `total_savings()`, `savings_by_month()`, `category_spending()`, `visited_stores()`, `search_leaflets()`
+- The cache is written to disk (fsync) before it replaces the old file, syncs running at the same time wait for each other instead of overwriting each other's changes, offers and leaflets are only saved when something changed
+- New module `lidlplus.analytics`; amounts like `"12,34"` are handled everywhere (before `lidl-plus stats` failed with a `TypeError`)
+- New `activate_all_coupons()`, used by the CLI and Home Assistant
+- Token handling: `AuthenticationError` for rejected refresh tokens, renewal shortly before expiry, one retry after HTTP 401, thread-safe renewal, `MissingLogin` instead of a `TypeError` without token
+- All requests check the HTTP status and share one session; `tickets(only_favorite=True)` sends the filter for every page
+- `sync()` skips receipts whose details cannot be loaded (HTTP 400/404/410) and tries them again next time
+- `activate_all_coupons()` also accepts coupon lists without sections and ignores unexpected answers of the optional API v1
+- `restock_suggestions()` counts several lines of an article on one receipt as one purchase
+- `loyalty_id()` returns the ID without quotes
+- Login: the Firefox fallback works with Selenium 4, Edge and Chromium are tried if Chrome is missing, the headless browser is closed afterwards
+- CLI: `stats` needs no login, errors are shown as message instead of traceback, a refresh token replaced by the auth server is printed
+- Requires Python 3.9+, test suite and CI for Python 3.9–3.14
 
 ### 1.1.0 — 2026-04-02
 **Home Assistant integration overhaul**

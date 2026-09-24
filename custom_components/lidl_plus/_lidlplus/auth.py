@@ -10,6 +10,7 @@ import hashlib
 import re
 import secrets
 import urllib.parse
+from html import unescape
 
 import requests
 
@@ -20,6 +21,7 @@ _TIMEOUT = 30
 
 
 # ── PKCE helpers ─────────────────────────────────────────────────────────────
+
 
 def _generate_pkce() -> tuple[str, str]:
     """Return (code_verifier, code_challenge) for OAuth PKCE."""
@@ -48,6 +50,7 @@ def _build_auth_url(country: str, language: str) -> tuple[str, str]:
 
 # ── Token exchange ────────────────────────────────────────────────────────────
 
+
 def _exchange_code(code: str, code_verifier: str) -> dict:
     """Exchange authorization code for access + refresh tokens."""
     secret = base64.b64encode(f"{_CLIENT_ID}:secret".encode()).decode()
@@ -61,9 +64,7 @@ def _exchange_code(code: str, code_verifier: str) -> dict:
         "redirect_uri": f"{_APP}://callback",
         "code_verifier": code_verifier,
     }
-    resp = requests.post(
-        f"{_AUTH_API}/connect/token", headers=headers, data=payload, timeout=_TIMEOUT
-    )
+    resp = requests.post(f"{_AUTH_API}/connect/token", headers=headers, data=payload, timeout=_TIMEOUT)
     resp.raise_for_status()
     return resp.json()
 
@@ -76,13 +77,9 @@ def _extract_code(text: str) -> str | None:
 
 def _extract_csrf(html: str) -> str:
     """Extract __RequestVerificationToken from an HTML page."""
-    match = re.search(
-        r'<input[^>]+name="__RequestVerificationToken"[^>]+value="([^"]+)"', html
-    )
+    match = re.search(r'<input[^>]+name="__RequestVerificationToken"[^>]+value="([^"]+)"', html)
     if not match:
-        match = re.search(
-            r'name="__RequestVerificationToken"[^>]+value="([^"]+)"', html
-        )
+        match = re.search(r'name="__RequestVerificationToken"[^>]+value="([^"]+)"', html)
     return match.group(1) if match else ""
 
 
@@ -95,6 +92,7 @@ def _extract_return_url(html: str) -> str:
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
+
 
 class LidlLoginSession:
     """
@@ -157,8 +155,8 @@ class LidlLoginSession:
 
         # Check for credential errors in response body
         if login_resp.status_code == 200:
-            body = login_resp.text
-            err_match = re.search(r'app-errors="\\{[^:]*?:.(.*?).}"', body)
+            body = unescape(login_resp.text)
+            err_match = re.search(r'app-errors="\{[^:]*?:.(.*?).}', body)
             if err_match:
                 raise LoginError(err_match.group(1))
             # Generic error fallback
@@ -175,13 +173,8 @@ class LidlLoginSession:
 
         # Follow redirect to 2FA page
         if location:
-            next_url = (
-                location if location.startswith("http")
-                else urllib.parse.urljoin(_AUTH_API, location)
-            )
-            twofactor_resp = self._session.get(
-                next_url, allow_redirects=True, timeout=_TIMEOUT
-            )
+            next_url = location if location.startswith("http") else urllib.parse.urljoin(_AUTH_API, location)
+            twofactor_resp = self._session.get(next_url, allow_redirects=True, timeout=_TIMEOUT)
         else:
             twofactor_resp = login_resp
 
@@ -225,10 +218,7 @@ class LidlLoginSession:
                 return
             if not location:
                 break
-            next_url = (
-                location if location.startswith("http")
-                else urllib.parse.urljoin(_AUTH_API, location)
-            )
+            next_url = location if location.startswith("http") else urllib.parse.urljoin(_AUTH_API, location)
             resp = self._session.get(next_url, allow_redirects=False, timeout=_TIMEOUT)
             location = resp.headers.get("Location", resp.url)
 

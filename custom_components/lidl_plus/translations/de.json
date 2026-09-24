@@ -1,0 +1,135 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Lidl Plus einrichten",
+        "description": "Refresh-Token mit dem Kommandozeilen-Tool holen: `lidl-plus --language=de --country=DE --user=deine@email.de auth`",
+        "data": {
+          "country": "Ländercode (z. B. DE)",
+          "language": "Sprachcode (z. B. de)",
+          "refresh_token": "Refresh-Token"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Lidl-Plus-Anmeldung erneuern",
+        "description": "Lidl Plus hat das Refresh-Token von {title} abgelehnt. Hol dir mit `lidl-plus ... auth` ein neues und gib es hier ein.",
+        "data": {
+          "refresh_token": "Refresh-Token"
+        }
+      },
+      "reconfigure": {
+        "title": "Lidl Plus neu konfigurieren",
+        "description": "Lass das Refresh-Token leer, um das aktuelle zu behalten.",
+        "data": {
+          "country": "Ländercode (z. B. DE)",
+          "language": "Sprachcode (z. B. de)",
+          "refresh_token": "Neues Refresh-Token (optional)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Das Refresh-Token ist ungültig oder abgelaufen. Bitte ein neues holen.",
+      "invalid_country": "Für dieses Land wurde kein Lidl-Plus-Konto gefunden. Bitte den Ländercode prüfen.",
+      "cannot_connect": "Verbindung zu Lidl Plus fehlgeschlagen. Bitte später erneut versuchen.",
+      "unknown": "Unerwarteter Fehler, Details stehen im Log."
+    },
+    "abort": {
+      "already_configured": "Dieses Lidl-Plus-Konto ist bereits eingerichtet, sein Refresh-Token wurde aktualisiert.",
+      "reauth_successful": "Die Lidl-Plus-Anmeldung wurde erneuert.",
+      "reconfigure_successful": "Die Konfiguration wurde aktualisiert.",
+      "wrong_account": "Das Refresh-Token gehört zu einem anderen Lidl-Plus-Konto."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Filialen für die Angebote",
+        "description": "Wähle die Filialen, deren aktuelle und kommende Angebote geladen werden. Ohne Auswahl wird die Filiale genommen, in der du am häufigsten einkaufst.",
+        "data": {
+          "offer_stores": "Filialen",
+          "search": "Weitere Filialen suchen"
+        },
+        "data_description": {
+          "search": "Ort, Postleitzahl oder Straße. Die gefundenen Filialen erscheinen in der Liste, dort auswählen und speichern."
+        }
+      }
+    },
+    "error": {
+      "no_stores": "Keine Filiale gefunden, bitte einen anderen Ort, eine andere Postleitzahl oder Straße versuchen.",
+      "cannot_connect": "Verbindung zu Lidl Plus fehlgeschlagen. Bitte später erneut versuchen."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "current_month_spending": { "name": "Ausgaben aktueller Monat" },
+      "average_basket": { "name": "Durchschnittlicher Einkauf" },
+      "shopping_frequency_days": { "name": "Einkaufsfrequenz" },
+      "category_food_spending": { "name": "Ausgaben Lebensmittel" },
+      "category_nonfood_spending": { "name": "Ausgaben Non-Food" },
+      "total_tickets": { "name": "Kassenbons gesamt" },
+      "new_tickets_last_sync": { "name": "Neue Kassenbons (letzte Synchronisierung)" },
+      "coupons_available": { "name": "Verfügbare Coupons" },
+      "coupons_activated": { "name": "Aktivierte Coupons" },
+      "price_changes_count": { "name": "Preisänderungen erkannt" },
+      "restock_suggestions_count": { "name": "Nachkauf-Vorschläge" },
+      "spending_by_month": { "name": "Ausgaben nach Monat" },
+      "spending_by_store": { "name": "Haupteinkaufsort" },
+      "frequently_bought": { "name": "Meistgekaufter Artikel" },
+      "products": { "name": "Artikel gesamt" },
+      "receipts": { "name": "Kassenbons" },
+      "last_receipt": { "name": "Letzter Einkauf" },
+      "last_error": { "name": "Letzter Fehler" },
+      "log": { "name": "Protokoll" },
+      "last_sync": { "name": "Letzte Synchronisierung" },
+      "loyalty_id": { "name": "Loyalty-ID" },
+      "savings_total": { "name": "Ersparnis" },
+      "savings_current_month": { "name": "Ersparnis aktueller Monat" },
+      "offers_current": { "name": "Aktuelle Angebote" },
+      "offers_upcoming": { "name": "Kommende Angebote" },
+      "offers_for_you": { "name": "Angebote für gekaufte Artikel" },
+      "leaflets": { "name": "Prospekte" }
+    }
+  },
+  "selector": {
+    "dataset": {
+      "options": {
+        "all": "Alles (ZIP-Datei)",
+        "receipts": "Kassenbons",
+        "items": "Artikel aller Kassenbons",
+        "products": "Produkte mit Statistik",
+        "offers": "Angebote",
+        "leaflets": "Prospekt-Produkte"
+      }
+    },
+    "format": {
+      "options": {
+        "csv": "CSV (Tabellenkalkulation)",
+        "json": "JSON"
+      }
+    }
+  },
+  "services": {
+    "sync": {
+      "name": "Kassenbons synchronisieren",
+      "description": "Ruft neue Kassenbons, Coupons, Angebote, Prospekte und Statistiken sofort von Lidl Plus ab."
+    },
+    "activate_all_coupons": {
+      "name": "Alle Coupons aktivieren",
+      "description": "Aktiviert alle aktuell gültigen Coupons aller eingerichteten Lidl-Plus-Konten."
+    },
+    "export": {
+      "name": "Daten exportieren",
+      "description": "Schreibt Kassenbons, Artikel, Angebote und Prospekte aller Lidl-Plus-Konten als Dateien in den Ordner lidl_plus_export der Konfiguration.",
+      "fields": {
+        "dataset": {
+          "name": "Daten",
+          "description": "Was exportiert wird, bei „Alles“ entsteht eine ZIP-Datei mit einer CSV-Datei pro Tabelle und allen Rohdaten."
+        },
+        "format": {
+          "name": "Format",
+          "description": "Dateiformat einer einzelnen Tabelle, CSV öffnet sich in Excel oder LibreOffice."
+        }
+      }
+    }
+  }
+}

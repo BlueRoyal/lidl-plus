@@ -5,16 +5,22 @@ DOMAIN = "lidl_plus"
 CONF_REFRESH_TOKEN = "refresh_token"
 CONF_COUNTRY = "country"
 CONF_LANGUAGE = "language"
+# Option: store keys whose offers are loaded, without it the most visited store is used
+CONF_OFFER_STORES = "offer_stores"
 
 DEFAULT_SCAN_INTERVAL_HOURS = 6
 FREQUENTLY_BOUGHT_LIMIT = 10
+PRICE_HISTORY_LENGTH = 20
+LOG_LENGTH = 50
 
 # Coordinator data keys
 KEY_CURRENT_MONTH_SPENDING = "current_month_spending"
+KEY_CURRENT_MONTH_START = "current_month_start"
 KEY_AVERAGE_BASKET = "average_basket"
 KEY_SHOPPING_FREQUENCY = "shopping_frequency_days"
 KEY_SPENDING_BY_MONTH = "spending_by_month"
 KEY_SPENDING_BY_STORE = "spending_by_store"
+KEY_TOTAL_SPENT = "total_spent"
 KEY_FREQUENTLY_BOUGHT = "frequently_bought"
 KEY_RESTOCK_SUGGESTIONS = "restock_suggestions"
 KEY_PRICE_CHANGES = "price_changes"
@@ -28,13 +34,32 @@ KEY_LAST_SYNC = "last_sync"
 KEY_NEW_TICKETS_LAST_SYNC = "new_tickets_last_sync"
 KEY_LOYALTY_ID = "loyalty_id"
 KEY_LAST_ERROR = "last_error"
+KEY_LOG = "log"
 KEY_PRODUCTS = "products"
 KEY_RECEIPTS = "receipts"
-
-# Tax type → product category (Germany/Austria/etc.)
-TAX_TYPE_FOOD = "B"      # 7 % — Lebensmittel
-TAX_TYPE_NONFOOD = "A"   # 19 % — Allgemein
+KEY_SAVINGS_TOTAL = "savings_total"
+KEY_SAVINGS_MONTH = "savings_current_month"
+KEY_SAVINGS_BY_MONTH = "savings_by_month"
+KEY_STORES = "stores"
+KEY_OFFER_STORES = "offer_stores"
+KEY_OFFERS = "offers"
+KEY_OFFERS_CURRENT = "offers_current"
+KEY_OFFERS_UPCOMING = "offers_upcoming"
+KEY_OFFERS_FOR_YOU = "offers_for_you"
+KEY_LEAFLETS = "leaflets"
+# Changes with every update of the data, also when only offers or leaflets changed
+KEY_DATA_VERSION = "data_version"
 
 # Services
 SERVICE_ACTIVATE_ALL_COUPONS = "activate_all_coupons"
 SERVICE_SYNC = "sync"
+SERVICE_EXPORT = "export"
+# Default folder of the export service, inside the config folder (not served, unlike www)
+EXPORT_DIR = "lidl_plus_export"
+
+# Sidebar panel
+PANEL_URL_PATH = "lidl-plus"
+PANEL_TITLE = "Lidl Plus"
+PANEL_ICON = "mdi:cart"
+PANEL_WEBCOMPONENT = "lidl-plus-panel"
+STATIC_URL_PATH = "/lidl_plus_frontend"

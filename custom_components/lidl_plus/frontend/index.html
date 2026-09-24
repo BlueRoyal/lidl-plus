@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lidl Plus</title>
+<!-- Shipped with the integration (see vendor/THIRD_PARTY_LICENSES.md): works offline, no CDN code in the HA origin -->
+<script src="vendor/tailwindcss-play-3.4.17.js"></script>
+<script src="vendor/chart-4.4.0.umd.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .tab { display: none !important; }
+  .tab.active { display: block !important; }
+  .tab-btn { padding: 13px 18px; border: none; background: none; cursor: pointer; font-size: 14px; font-weight: 500; color: #6b7280; border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.2s; white-space: nowrap; }
+  .tab-btn:hover { color: #003882; }
+  .tab-btn.active { color: #003882; border-bottom-color: #003882; }
+  .receipt-items { display: none; }
+  .receipt-items.open { display: block; }
+  .chevron { transition: transform 0.2s; display: inline-block; }
+  .chevron.open { transform: rotate(90deg); }
+  .modal-overlay { display: none; }
+  .modal-overlay.open { display: flex; }
+  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  #accountSelect option { color: #111827; }
+  .btn { display: inline-flex; align-items: center; gap: 4px; padding: 5px 11px; border-radius: 10px; font-size: 12px; font-weight: 500; background: #f3f4f6; color: #1f2937; cursor: pointer; text-decoration: none; }
+  .btn:hover { background: #e5e7eb; }
+  .btn-primary { background: #003882; color: #fff; }
+  .btn-primary:hover { background: #002a63; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 9999px; padding: 2px 8px; }
+  .badge-current { background: #dcfce7; color: #15803d; }
+  .badge-upcoming { background: #fef3c7; color: #b45309; }
+  .section-title { font-size: 11px; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: .05em; margin: 4px 0 8px; }
+  .menu-item { display: block; width: 100%; text-align: left; padding: 9px 14px; font-size: 13px; background: none; border: none; cursor: pointer; }
+  .menu-item:hover { background: #f3f4f6; }
+</style>
+</head>
+<body class="bg-gray-100 text-gray-900 text-sm">
+
+<!-- ── HEADER ─────────────────────────────────────────────────────────────── -->
+<header class="bg-[#003882] text-white px-5 py-3.5 flex items-center gap-3 sticky top-0 z-50 shadow-xl">
+  <!-- Opens the HA sidebar on narrow screens, where the panel has no other way to reach it -->
+  <button id="menuBtn" class="hidden -ml-2 p-1 rounded-lg hover:bg-white/10" onclick="toggleSidebar()" aria-label="Menü">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg>
+  </button>
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+    <path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM5.17 5H2V3H0v2h2l3.6 7.59-1.35 2.44C4.09 15.31 4 15.64 4 16c0 1.1.9 2 2 2h14v-2H6.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63H19c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0023.46 5H5.17z"/>
+  </svg>
+  <h1 class="text-lg font-semibold tracking-tight">Lidl Plus</h1>
+  <!-- Only shown with more than one Lidl Plus account -->
+  <select id="accountSelect" class="hidden bg-white/10 text-white text-xs rounded-lg px-2 py-1 outline-none max-w-[40%]"
+          onchange="selectAccount(this.value)" aria-label="Konto"></select>
+  <span class="ml-auto text-xs opacity-70 shrink-0" id="syncInfo">Lade…</span>
+  <div class="relative shrink-0">
+    <button id="exportBtn" class="p-1.5 -mr-1.5 rounded-lg hover:bg-white/10" onclick="toggleExportMenu(event)"
+            aria-label="Daten exportieren" title="Daten exportieren">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/></svg>
+    </button>
+    <div id="exportMenu" class="hidden absolute right-0 top-10 bg-white text-gray-800 rounded-xl shadow-2xl py-1.5 w-72 z-50">
+      <div class="px-3.5 pt-1 pb-1.5 text-[11px] text-gray-400 uppercase tracking-wide">Exportieren</div>
+      <button class="menu-item" data-dataset="all">📦 Alles (ZIP: alle Tabellen + Rohdaten)</button>
+      <button class="menu-item" data-dataset="receipts" data-format="csv">🧾 Kassenbons (CSV)</button>
+      <button class="menu-item" data-dataset="items" data-format="csv">🛒 Artikel aller Kassenbons (CSV)</button>
+      <button class="menu-item" data-dataset="products" data-format="csv">📦 Produkte mit Statistik (CSV)</button>
+      <button class="menu-item" data-dataset="offers" data-format="csv">🏷️ Angebote (CSV)</button>
+      <button class="menu-item" data-dataset="leaflets" data-format="csv">📰 Prospekt-Produkte (CSV)</button>
+    </div>
+  </div>
+</header>
+
+<!-- ── NAVIGATION ────────────────────────────────────────────────────────── -->
+<nav class="bg-white border-b-2 border-gray-200 px-4 flex overflow-x-auto">
+  <button class="tab-btn active" onclick="showTab('overview',this)">📊 Übersicht</button>
+  <button class="tab-btn" onclick="showTab('receipts',this)">🧾 Kassenbons</button>
+  <button class="tab-btn" onclick="showTab('products',this)">📦 Artikel</button>
+  <button class="tab-btn" onclick="showTab('offers',this)">🏷️ Angebote</button>
+  <button class="tab-btn" onclick="showTab('leaflets',this)">📰 Prospekte</button>
+</nav>
+
+<div class="max-w-7xl mx-auto px-4 py-5">
+
+<!-- Fehler beim Laden bzw. bei der letzten Synchronisierung -->
+<div id="errorBanner" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-2xl px-4 py-3 mb-4"></div>
+<div id="syncWarning" class="hidden bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl px-4 py-3 mb-4"></div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: ÜBERSICHT
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-overview" class="tab active">
+
+  <!-- KPI-Karten -->
+  <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-5" id="overviewCards">
+    <div class="bg-white rounded-2xl p-4 shadow-sm text-center animate-pulse">
+      <div class="h-7 bg-gray-100 rounded mb-2 mx-4"></div>
+      <div class="h-3 bg-gray-100 rounded mx-6"></div>
+    </div>
+  </div>
+
+  <!-- Monatliche Ausgaben -->
+  <div class="bg-white rounded-2xl p-5 shadow-sm mb-4">
+    <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">📅 Ausgaben pro Monat</h2>
+    <div style="height:260px;position:relative"><canvas id="chartMonthly"></canvas></div>
+  </div>
+
+  <!-- Kategorie + Filialen -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="bg-white rounded-2xl p-5 shadow-sm">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">🥦 Ausgaben nach Kategorie</h2>
+      <div style="height:240px;position:relative"><canvas id="chartCategory"></canvas></div>
+    </div>
+    <div class="bg-white rounded-2xl p-5 shadow-sm">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">🏪 Top Filialen</h2>
+      <div style="height:240px;position:relative"><canvas id="chartStores"></canvas></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: KASSENBONS
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-receipts" class="tab">
+
+  <!-- Filter-Panel -->
+  <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <input type="text" id="receiptSearch" placeholder="🔍 Filiale oder Artikel…"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] transition-colors"
+             oninput="filterReceipts()">
+      <select id="receiptStore"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterReceipts()">
+        <option value="">Alle Filialen</option>
+      </select>
+      <select id="receiptSort"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterReceipts()">
+        <option value="date-desc">Neueste zuerst</option>
+        <option value="date-asc">Älteste zuerst</option>
+        <option value="total-desc">Höchster Betrag</option>
+        <option value="total-asc">Niedrigster Betrag</option>
+      </select>
+      <div class="flex gap-2">
+        <input type="number" id="receiptMin" placeholder="Min €" step="0.01" min="0"
+               class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] w-full"
+               oninput="filterReceipts()">
+        <input type="number" id="receiptMax" placeholder="Max €" step="0.01" min="0"
+               class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] w-full"
+               oninput="filterReceipts()">
+      </div>
+      <input type="date" id="receiptFrom"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]"
+             onchange="filterReceipts()">
+      <input type="date" id="receiptTo"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]"
+             onchange="filterReceipts()">
+    </div>
+    <p class="mt-2.5 text-xs text-gray-400" id="receiptCount"></p>
+  </div>
+
+  <div id="receiptList" class="text-center py-16 text-gray-400">Lade Kassenbons…</div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: ARTIKEL
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-products" class="tab">
+
+  <!-- KPI-Karten -->
+  <div class="grid grid-cols-3 gap-3 mb-4" id="productStats"></div>
+
+  <!-- Filter-Panel -->
+  <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <input type="text" id="productSearch" placeholder="🔍 Artikel suchen…"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]"
+             oninput="filterProducts()">
+      <select id="productSort"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterProducts()">
+        <option value="count-desc">Häufig gekauft</option>
+        <option value="spent-desc">Meiste Ausgaben</option>
+        <option value="savings-desc">Meiste Ersparnis</option>
+        <option value="name-asc">Name A–Z</option>
+        <option value="last-desc">Zuletzt gekauft</option>
+        <option value="price-desc">Höchster Preis</option>
+        <option value="price-asc">Niedrigster Preis</option>
+      </select>
+      <select id="productTrend"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterProducts()">
+        <option value="">Alle Preistrends</option>
+        <option value="up">↑ Preis gestiegen</option>
+        <option value="down">↓ Preis gesunken</option>
+        <option value="stable">→ Preis stabil</option>
+      </select>
+      <select id="productPeriod"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterProducts()">
+        <option value="">Alle Zeiträume</option>
+        <option value="30">Letzte 30 Tage</option>
+        <option value="90">Letzte 90 Tage</option>
+        <option value="180">Letzte 6 Monate</option>
+        <option value="365">Letztes Jahr</option>
+      </select>
+    </div>
+    <p class="mt-2.5 text-xs text-gray-400" id="productCount"></p>
+  </div>
+
+  <div id="productGrid" class="text-center py-16 text-gray-400">Lade Artikel…</div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: ANGEBOTE
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-offers" class="tab">
+
+  <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+    <p class="text-xs text-gray-500 mb-3" id="offerStores"></p>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <input type="text" id="offerSearch" placeholder="🔍 Angebot suchen…"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]"
+             oninput="filterOffers()">
+      <select id="offerStatus"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterOffers()">
+        <option value="">Aktuelle und kommende</option>
+        <option value="current">Nur aktuelle</option>
+        <option value="upcoming">Nur kommende</option>
+      </select>
+      <label class="flex items-center gap-2 text-gray-600 cursor-pointer select-none">
+        <input type="checkbox" id="offerBought" onchange="filterOffers()" class="w-4 h-4 accent-[#003882]">
+        Nur Artikel, die ich schon gekauft habe
+      </label>
+    </div>
+    <p class="mt-2.5 text-xs text-gray-400" id="offerCount"></p>
+  </div>
+
+  <div id="offerGrid" class="text-center py-16 text-gray-400">Lade Angebote…</div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: PROSPEKTE
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-leaflets" class="tab">
+
+  <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+    <form id="searchForm" class="flex gap-2" onsubmit="searchAll(event)">
+      <input type="search" id="globalSearch" placeholder="🔍 Prospekte, Angebote und Einkäufe durchsuchen, z. B. Kaffee"
+             class="flex-1 min-w-0 border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]">
+      <button type="submit" class="btn btn-primary !text-sm !px-4">Suchen</button>
+    </form>
+    <div id="searchResults" class="hidden mt-4"></div>
+  </div>
+
+  <div id="leafletGrid" class="text-center py-16 text-gray-400">Lade Prospekte…</div>
+
+</div>
+
+</div><!-- /max-w-7xl -->
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PRODUKT-DETAIL MODAL
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay fixed inset-0 bg-black/50 z-50 items-center justify-center p-4"
+     id="productModal" onclick="closeModal(event)">
+  <div class="bg-white rounded-2xl w-full max-w-xl max-h-[88vh] overflow-y-auto shadow-2xl">
+    <div class="flex items-start justify-between px-6 pt-5 pb-3 sticky top-0 bg-white rounded-t-2xl border-b border-gray-100">
+      <h2 class="text-base font-bold text-[#003882] pr-4 leading-tight" id="modalTitle"></h2>
+      <button class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0 mt-[-2px]"
+              onclick="closeProductModal()" aria-label="Schließen">×</button>
+    </div>
+    <div class="px-6 pb-6 pt-4">
+      <div id="modalStats" class="grid grid-cols-3 gap-2 mb-3"></div>
+      <div id="modalSavings" class="text-xs text-green-700 mb-4"></div>
+      <div id="modalChartWrapper" style="position:relative;height:200px;margin-bottom:20px">
+        <canvas id="modalPriceChart"></canvas>
+      </div>
+      <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Preishistorie</h3>
+      <div id="modalHistory"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PROSPEKT MODAL
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay fixed inset-0 bg-black/50 z-50 items-center justify-center p-4"
+     id="leafletModal" onclick="closeModal(event)">
+  <div class="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl">
+    <div class="flex items-start justify-between px-6 pt-5 pb-3 sticky top-0 bg-white rounded-t-2xl border-b border-gray-100 z-10">
+      <h2 class="text-base font-bold text-[#003882] pr-4 leading-tight" id="leafletTitle"></h2>
+      <button class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0 mt-[-2px]"
+              onclick="closeLeafletModal()" aria-label="Schließen">×</button>
+    </div>
+    <div class="px-6 pb-6 pt-4" id="leafletBody"></div>
+  </div>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let allReceipts = [], allProducts = [], allOffers = [], allLeaflets = [], appData = {}, receiptsById = new Map();
+// Account shown and the data version it was rendered from (null until something is rendered)
+let entryId = null, renderedSync = null, rendered = false;
+let chartMonthly, chartCategory, chartStores, chartModal;
+// Calls answered by the panel element, and the latest leaflet and search request
+let callCounter = 0, leafletRequest = 0, searchRequest = 0;
+const pendingCalls = new Map();
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const CALL_TIMEOUT_MS = 60 * 1000;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const ESCAPES = {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ESCAPES[c]);
+// Only web addresses are used as links and images, never javascript: or data: from the API data
+const safeUrl = u => /^https?:\/\//i.test(String(u ?? '')) ? String(u) : '';
+const EURO = new Intl.NumberFormat('de-DE', {style:'currency', currency:'EUR'});
+const fmt = v => EURO.format(Number(v) || 0);
+const fmtNum = (v, digits = 2) =>
+  (Number(v) || 0).toLocaleString('de-DE', {minimumFractionDigits: digits, maximumFractionDigits: digits});
+const fmtQty = v => (Number(v) || 0).toLocaleString('de-DE', {maximumFractionDigits: 3});
+const toNum = v => parseFloat(String(v ?? '').replace(',', '.')) || 0;
+const monthKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const EXTERNAL = 'target="_blank" rel="noopener noreferrer"';
+
+function fmtDate(s) {
+  if (!s) return '–';
+  const d = new Date(s);
+  if (isNaN(d)) return esc(String(s).slice(0,10));
+  return d.toLocaleDateString('de-DE', {day:'2-digit', month:'2-digit', year:'numeric'});
+}
+function fmtDateTime(s) {
+  if (!s) return '–';
+  const d = new Date(s);
+  if (isNaN(d)) return String(s).slice(0,16).replace('T',' ');
+  return d.toLocaleString('de-DE', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+}
+// Days of leaflets like "2026-05-18" are local days, new Date() would read them as UTC
+function parseDay(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s ?? ''));
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(s);
+}
+function fmtDay(s) {
+  if (!s) return '–';
+  const d = parseDay(s);
+  if (isNaN(d)) return esc(String(s).slice(0,10));
+  const options = {weekday:'short', day:'2-digit', month:'2-digit'};
+  // Some leaflets run for years, like the one about the Lidl Plus benefits
+  if (d.getFullYear() !== new Date().getFullYear()) options.year = 'numeric';
+  return d.toLocaleDateString('de-DE', options);
+}
+// "bis Sa., 16.05." for current offers and leaflets, "ab Mo., 18.05." for upcoming ones
+function validity(entry) {
+  return entry.status === 'upcoming'
+    ? `<span class="badge badge-upcoming">ab ${fmtDay(entry.start)}</span>`
+    : `<span class="badge badge-current">bis ${fmtDay(entry.end)}</span>`;
+}
+
+function getPriceTrend(p) {
+  const hist = (p.price_history||[]).filter(h=>h.price>0);
+  if (hist.length < 2) return 'stable';
+  const prev = parseFloat(hist[hist.length-2].price);
+  const curr = parseFloat(hist[hist.length-1].price);
+  if (curr > prev * 1.005) return 'up';
+  if (curr < prev * 0.995) return 'down';
+  return 'stable';
+}
+
+// ── Data loading ──────────────────────────────────────────────────────────────
+// The Home Assistant panel element (panel.js) loads the data through the
+// authenticated websocket API and sends it to this page.
+window.addEventListener('message', event => {
+  if (event.source !== window.parent || event.origin !== location.origin) return;
+  const msg = event.data || {};
+  if (msg.type === 'lidl-plus:data') applyData(msg.data || {});
+  else if (msg.type === 'lidl-plus:error') showError('Daten konnten nicht geladen werden: ' + (msg.message || 'unbekannter Fehler'));
+  else if (msg.type === 'lidl-plus:menu') document.getElementById('menuBtn').classList.toggle('hidden', !msg.visible);
+  else if (msg.type === 'lidl-plus:result') settleCall(msg);
+});
+
+function requestData() {
+  // With known_sync the panel only gets the large lists if the data changed since
+  window.parent.postMessage({type:'lidl-plus:request', entry_id: entryId, known_sync: renderedSync}, location.origin);
+}
+
+// A call answered by the panel element with lidl-plus:result
+function postCall(message) {
+  return new Promise((resolve, reject) => {
+    const id = ++callCounter;
+    const timer = setTimeout(() => {
+      pendingCalls.delete(id);
+      reject(new Error('keine Antwort von Home Assistant'));
+    }, CALL_TIMEOUT_MS);
+    pendingCalls.set(id, {resolve, reject, timer});
+    window.parent.postMessage({...message, id}, location.origin);
+  });
+}
+
+function settleCall(msg) {
+  const pending = pendingCalls.get(msg.id);
+  if (!pending) return;
+  pendingCalls.delete(msg.id);
+  clearTimeout(pending.timer);
+  if (msg.error) pending.reject(new Error(msg.error));
+  else pending.resolve(msg.result);
+}
+
+// Websocket command of the integration for the account shown
+function wsCall(type, fields) {
+  const request = {type, ...fields};
+  if (entryId) request.entry_id = entryId;
+  return postCall({type: 'lidl-plus:call', request});
+}
+
+function selectAccount(id) {
+  entryId = id;
+  renderedSync = null;
+  clearSearch();
+  requestData();
+}
+
+function updateAccountSelect(accounts) {
+  const sel = document.getElementById('accountSelect');
+  sel.classList.toggle('hidden', accounts.length < 2);
+  const signature = accounts.map(a => `${a.entry_id}=${a.title}`).join('|');
+  if (sel.dataset.signature !== signature) {
+    sel.innerHTML = accounts.map(a => `<option value="${esc(a.entry_id)}">${esc(a.title)}</option>`).join('');
+    sel.dataset.signature = signature;
+  }
+  if (entryId) sel.value = entryId;
+}
+
+function applyData(data) {
+  const accounts = data.accounts || [];
+  // Answer to a request made before switching the account
+  if (entryId && data.entry_id !== entryId && accounts.some(a => a.entry_id === entryId)) return;
+  entryId = data.entry_id || entryId;
+  updateAccountSelect(accounts);
+
+  document.getElementById('errorBanner').classList.add('hidden');
+  const warning = document.getElementById('syncWarning');
+  warning.textContent = data.last_error ? '⚠️ Letzte Synchronisierung fehlgeschlagen: ' + data.last_error : '';
+  warning.classList.toggle('hidden', !data.last_error);
+
+  // Nothing new since the last render, so opened receipts and filters stay as they are
+  if (data.unchanged) return;
+  appData = data;
+  allReceipts = data.receipts || [];
+  allProducts = data.products || [];
+  allOffers = data.offers || [];
+  allLeaflets = data.leaflets || [];
+  receiptsById = new Map(allReceipts.map(r => [String(r.id), r]));
+  document.getElementById('syncInfo').textContent = 'Stand: ' + fmtDateTime(data.last_sync);
+
+  // Every part on its own: a failing chart must not hide the receipts
+  const failed = [];
+  for (const [part, render] of [
+    ['Übersicht', renderOverview],
+    ['Kassenbons', () => { populateStoreFilter(); filterReceipts(); }],
+    ['Artikel', () => { renderProductStats(allProducts); filterProducts(); }],
+    ['Angebote', () => { renderOfferStores(); filterOffers(); }],
+    ['Prospekte', renderLeaflets],
+  ]) {
+    try {
+      render();
+    } catch (err) {
+      console.error(err);
+      failed.push(`${part} (${err.message})`);
+    }
+  }
+  rendered = true;
+  if (failed.length) {
+    // Without renderedSync the next request loads and renders everything again
+    renderedSync = null;
+    showError('Nicht alles konnte angezeigt werden: ' + failed.join(', '));
+    return;
+  }
+  renderedSync = data.version || data.last_sync || null;
+}
+
+function showError(message) {
+  const banner = document.getElementById('errorBanner');
+  banner.textContent = '⚠️ ' + message;
+  banner.classList.remove('hidden');
+  if (rendered) return;
+  document.getElementById('syncInfo').textContent = '–';
+  ['receiptList','productGrid','offerGrid','leafletGrid'].forEach(id => {
+    const el = document.getElementById(id);
+    el.className = 'text-center py-16 text-gray-400';
+    el.textContent = 'Keine Daten verfügbar.';
+  });
+}
+
+function toggleSidebar() {
+  window.parent.postMessage({type:'lidl-plus:toggle-menu'}, location.origin);
+}
+
+// ── Tab navigation ────────────────────────────────────────────────────────────
+function showTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+function toggleExportMenu(event) {
+  event.stopPropagation();
+  document.getElementById('exportMenu').classList.toggle('hidden');
+}
+
+document.addEventListener('click', () => document.getElementById('exportMenu').classList.add('hidden'));
+
+document.getElementById('exportMenu').addEventListener('click', event => {
+  const item = event.target.closest('[data-dataset]');
+  if (item) exportData(item.dataset.dataset, item.dataset.format);
+});
+
+// The panel element downloads the file, the browser saves it
+async function exportData(dataset, format) {
+  document.getElementById('exportMenu').classList.add('hidden');
+  const message = {type: 'lidl-plus:export', dataset};
+  if (format) message.format = format;
+  if (entryId) message.entry_id = entryId;
+  try {
+    await postCall(message);
+  } catch (err) {
+    showError('Export fehlgeschlagen: ' + err.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ÜBERSICHT
+// ══════════════════════════════════════════════════════════════════════════════
+function totalSpending() {
+  return appData.total_spent ?? allReceipts.reduce((s,r)=>s+(r.total||0), 0);
+}
+
+function renderOverview() {
+  const totalSpent = totalSpending();
+  const receiptCount = appData.total_tickets ?? allReceipts.length;
+  const avgBasket = appData.avg_basket || (receiptCount ? totalSpent/receiptCount : 0);
+
+  document.getElementById('overviewCards').innerHTML = [
+    {icon:'🧾', val:receiptCount,                    label:'Kassenbons',           color:'text-[#003882]'},
+    {icon:'📦', val:allProducts.length,              label:'Einzigartige Artikel', color:'text-purple-600'},
+    {icon:'💶', val:fmt(totalSpent),                 label:'Gesamtausgaben',       color:'text-green-600'},
+    {icon:'🛒', val:fmt(avgBasket),                  label:'Ø Einkauf',            color:'text-orange-500'},
+    {icon:'📅', val:fmt(appData.current_month),      label:'Diesen Monat',         color:'text-[#003882]'},
+    {icon:'💰', val:fmt(appData.savings_total),      label:'Gespart mit Rabatten', color:'text-green-600'},
+  ].map(c=>`
+    <div class="bg-white rounded-2xl p-4 shadow-sm text-center">
+      <div class="text-2xl mb-1.5">${c.icon}</div>
+      <div class="text-xl font-bold ${c.color}">${c.val}</div>
+      <div class="text-xs text-gray-400 mt-1">${c.label}</div>
+    </div>`).join('');
+
+  renderMonthlyChart();
+  renderCategoryChart();
+  renderStoresChart();
+}
+
+function renderMonthlyChart() {
+  const byMonth = {...(appData.spending_by_month || {})};
+  if (!Object.keys(byMonth).length) {
+    allReceipts.forEach(r => {
+      const m = (r.date||'').slice(0,7);
+      if (m) byMonth[m] = (byMonth[m]||0) + (r.total||0);
+    });
+  }
+  const savings = appData.savings_by_month || {};
+  const months = Object.keys(byMonth).sort().slice(-12);
+  const values = months.map(m => byMonth[m]);
+  const saved = months.map(m => savings[m] || 0);
+  const labels = months.map(m => {
+    const [y,mo] = m.split('-');
+    return new Date(+y, +mo-1, 1).toLocaleString('de-DE', {month:'short', year:'2-digit'});
+  });
+  const now = monthKey(new Date());
+  const datasets = [{
+    label: 'Ausgaben',
+    data: values,
+    backgroundColor: months.map(m => m===now ? '#ffed00' : 'rgba(0,56,130,0.75)'),
+    borderColor:      months.map(m => m===now ? '#d4c400' : '#003882'),
+    borderWidth: 1,
+    borderRadius: 6,
+  }];
+  if (saved.some(v => v > 0)) {
+    datasets.push({label: 'Gespart', data: saved, backgroundColor: 'rgba(22,163,74,0.7)', borderRadius: 6});
+  }
+
+  if (chartMonthly) chartMonthly.destroy();
+  chartMonthly = new Chart(document.getElementById('chartMonthly'), {
+    type: 'bar',
+    data: {labels, datasets},
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{display: datasets.length > 1, position:'bottom'},
+        tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${fmt(c.raw)}`}}
+      },
+      scales:{
+        y:{ticks:{callback:v=>fmtNum(v,0)+' €'}, grid:{color:'#f3f4f6'}},
+        x:{grid:{display:false}}
+      }
+    }
+  });
+}
+
+function renderCategoryChart() {
+  const food    = appData.food_total    || 0;
+  const nonfood = appData.nonfood_total || 0;
+  // Deposits and returns, receipts without articles
+  const unknown = Math.max(0, totalSpending() - food - nonfood);
+
+  if (chartCategory) chartCategory.destroy();
+  chartCategory = new Chart(document.getElementById('chartCategory'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Lebensmittel', 'Non-Food', 'Sonstiges (Pfand, ohne Artikel)'],
+      datasets: [{
+        data: [food, nonfood, unknown],
+        backgroundColor: ['#003882','#ffed00','#e5e7eb'],
+        borderWidth: 2, borderColor:'#fff',
+      }]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      cutout:'65%',
+      plugins:{
+        legend:{position:'bottom', labels:{font:{size:12}, padding:12}},
+        tooltip:{callbacks:{label:c=>` ${fmt(c.raw)} (${fmtNum(c.raw/(food+nonfood+unknown||1)*100, 1)} %)`}}
+      }
+    }
+  });
+}
+
+function renderStoresChart() {
+  const byStore = {...(appData.spending_by_store || {})};
+  if (!Object.keys(byStore).length) {
+    allReceipts.forEach(r => {
+      if (r.store) byStore[r.store] = (byStore[r.store]||0) + (r.total||0);
+    });
+  }
+  const sorted = Object.entries(byStore).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const labels = sorted.map(([k])=>k.length>22?k.slice(0,20)+'…':k);
+  const values = sorted.map(([,v])=>v);
+
+  if (chartStores) chartStores.destroy();
+  chartStores = new Chart(document.getElementById('chartStores'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: 'rgba(0,56,130,0.75)',
+        borderRadius: 5,
+      }]
+    },
+    options: {
+      indexAxis:'y',
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>` ${fmt(c.raw)}`}}},
+      scales:{
+        x:{ticks:{callback:v=>fmtNum(v,0)+' €'}, grid:{color:'#f3f4f6'}},
+        y:{grid:{display:false}}
+      }
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// KASSENBONS
+// ══════════════════════════════════════════════════════════════════════════════
+function populateStoreFilter() {
+  const stores = [...new Set(allReceipts.map(r=>r.store).filter(Boolean))].sort();
+  const sel = document.getElementById('receiptStore');
+  const selected = sel.value;
+  // Keep first "Alle Filialen" option
+  while (sel.options.length > 1) sel.remove(1);
+  stores.forEach(s => { const o=document.createElement('option'); o.value=s; o.textContent=s; sel.appendChild(o); });
+  if (stores.includes(selected)) sel.value = selected;
+}
+
+function filterReceipts() {
+  const q     = document.getElementById('receiptSearch').value.toLowerCase();
+  const sort  = document.getElementById('receiptSort').value;
+  const store = document.getElementById('receiptStore').value;
+  // Empty fields do not filter, receipts of a deposit return can be negative
+  const minV  = parseFloat(document.getElementById('receiptMin').value);
+  const maxV  = parseFloat(document.getElementById('receiptMax').value);
+  const from  = document.getElementById('receiptFrom').value;
+  const to    = document.getElementById('receiptTo').value;
+
+  let filtered = allReceipts.filter(r => {
+    if (store && r.store !== store) return false;
+    if (r.total < minV || r.total > maxV) return false; // comparisons with NaN are false
+    if (from && (r.date||'').slice(0,10) < from) return false;
+    if (to   && (r.date||'').slice(0,10) > to)   return false;
+    if (q) {
+      const inStore = (r.store||'').toLowerCase().includes(q);
+      const inItems = (r.items||[]).some(i=>(i.name||'').toLowerCase().includes(q));
+      if (!inStore && !inItems) return false;
+    }
+    return true;
+  });
+
+  filtered.sort((a,b) => {
+    if (sort==='date-desc')  return (b.date||'').localeCompare(a.date||'');
+    if (sort==='date-asc')   return (a.date||'').localeCompare(b.date||'');
+    if (sort==='total-desc') return b.total - a.total;
+    if (sort==='total-asc')  return a.total - b.total;
+    return 0;
+  });
+
+  const sum = filtered.reduce((s,r)=>s+r.total, 0);
+  document.getElementById('receiptCount').textContent =
+    `${filtered.length} von ${allReceipts.length} Kassenbons · Summe: ${fmt(sum)}`;
+
+  renderReceipts(filtered);
+}
+
+function renderReceipts(receipts) {
+  const el = document.getElementById('receiptList');
+  if (!receipts.length) {
+    el.className = 'text-center py-16 text-gray-400';
+    el.textContent = 'Keine Kassenbons gefunden.';
+    return;
+  }
+  el.className = '';
+  // The article tables are rendered when a receipt is opened
+  el.innerHTML = receipts.map(r => `
+    <div class="bg-white rounded-2xl shadow-sm mb-2 overflow-hidden">
+      <div class="flex items-center gap-3 px-4 py-3.5 cursor-pointer hover:bg-gray-50 select-none"
+           data-receipt-id="${esc(r.id)}" onclick="toggleReceipt(this)">
+        <span class="font-semibold text-[#003882] whitespace-nowrap text-sm">${fmtDate(r.date)}</span>
+        <span class="flex-1 text-gray-600 truncate">${esc(r.store||'Unbekannt')}</span>
+        ${r.savings > 0 ? `<span class="text-xs text-green-600 whitespace-nowrap hidden sm:inline">${fmt(r.savings)} gespart</span>` : ''}
+        <span class="font-bold text-green-600 whitespace-nowrap">${fmt(r.total)}</span>
+        <span class="text-xs text-gray-400 whitespace-nowrap hidden sm:inline">${(r.items||[]).length} Artikel</span>
+        <span class="chevron text-gray-400 text-lg leading-none">›</span>
+      </div>
+      <div class="receipt-items border-t border-gray-100"></div>
+    </div>`).join('');
+}
+
+function renderReceiptItems(receipt) {
+  receipt = receipt || {};
+  const rows = (receipt.items || []).map(i => {
+    const price = toNum(i.unit_price);
+    const qty   = toNum(i.quantity) || 1;
+    const unit  = i.unit ? ' ' + esc(i.unit) : '';
+    // Amount printed on the receipt, the discounts follow in their own lines
+    const total = i.total != null ? toNum(i.total) : price * qty;
+    const deposit = i.is_deposit ? ' <span class="text-[10px] bg-gray-100 text-gray-500 rounded px-1.5 py-0.5">Pfand</span>' : '';
+    const discounts = (i.discounts || []).map(d => `<tr class="text-green-700">
+        <td class="pl-5 sm:pl-8 pr-2 sm:pr-4 py-1 text-xs" colspan="3">↳ ${esc(d.text || 'Rabatt')}</td>
+        <td class="px-2 sm:px-4 py-1 text-xs text-right whitespace-nowrap">${fmt(d.amount)}</td>
+      </tr>`).join('');
+    return `<tr class="border-t border-gray-50 hover:bg-gray-50/70">
+      <td class="px-2 sm:px-4 py-2.5 text-gray-800">${esc(i.name||i.id)}${deposit}</td>
+      <td class="px-2 sm:px-4 py-2.5 text-gray-500 text-right whitespace-nowrap">${fmtQty(qty)}${unit}</td>
+      <td class="px-2 sm:px-4 py-2.5 text-gray-500 text-right whitespace-nowrap">${price?fmt(price)+(i.unit?'/'+esc(i.unit):''):'–'}</td>
+      <td class="px-2 sm:px-4 py-2.5 font-semibold text-right whitespace-nowrap">${fmt(total)}</td>
+    </tr>${discounts}`;
+  }).join('');
+
+  const summary = [];
+  (receipt.deposit_returns || []).forEach(d => summary.push([
+    'Pfandrückgabe' + (d.count ? ` (${esc(d.count)} × ${fmt(d.unit_amount)})` : ''), fmt(d.amount),
+  ]));
+  if (receipt.savings > 0) summary.push(['Gespart mit Rabatten', `<span class="text-green-600">${fmt(receipt.savings)}</span>`]);
+  (receipt.payments || []).forEach(p => summary.push([`Bezahlt mit ${esc(p.method)}`, p.amount != null ? fmt(p.amount) : '']));
+  if (receipt.points) summary.push(['Lidl Plus Punkte', esc(receipt.points)]);
+  summary.push(['<strong>Summe</strong>', `<strong>${fmt(receipt.total)}</strong>`]);
+
+  return `<table class="w-full text-sm">
+    <thead><tr class="bg-gray-50 text-xs text-gray-400 uppercase tracking-wide">
+      <th class="px-2 sm:px-4 py-2 text-left font-medium">Artikel</th>
+      <th class="px-2 sm:px-4 py-2 text-right font-medium">Menge</th>
+      <th class="px-2 sm:px-4 py-2 text-right font-medium"><span class="sm:hidden">Preis</span><span class="hidden sm:inline">Einzelpreis</span></th>
+      <th class="px-2 sm:px-4 py-2 text-right font-medium">Gesamt</th>
+    </tr></thead>
+    <tbody>${rows||'<tr><td colspan="4" class="px-2 sm:px-4 py-5 text-center text-gray-400">Keine Artikel</td></tr>'}</tbody>
+    <tfoot class="border-t-2 border-gray-100 text-gray-600">${summary.map(([label, value]) => `<tr>
+      <td class="px-2 sm:px-4 py-1.5" colspan="3">${label}</td>
+      <td class="px-2 sm:px-4 py-1.5 text-right whitespace-nowrap">${value}</td>
+    </tr>`).join('')}</tfoot>
+  </table>`;
+}
+
+function toggleReceipt(header) {
+  const items = header.nextElementSibling;
+  if (!items.dataset.rendered) {
+    items.innerHTML = renderReceiptItems(receiptsById.get(header.dataset.receiptId));
+    items.dataset.rendered = '1';
+  }
+  items.classList.toggle('open');
+  header.querySelector('.chevron').classList.toggle('open');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ARTIKEL
+// ══════════════════════════════════════════════════════════════════════════════
+function renderProductStats(products) {
+  const totalSpent = products.reduce((s,p)=>s+p.total_spent, 0);
+  const totalBuys  = products.reduce((s,p)=>s+p.purchase_count, 0);
+  document.getElementById('productStats').innerHTML = [
+    {val:products.length,    label:'Einzigartige Artikel', color:'text-[#003882]'},
+    {val:totalBuys,          label:'Käufe gesamt',          color:'text-purple-600'},
+    {val:fmt(totalSpent),    label:'Gesamtausgaben',        color:'text-green-600'},
+  ].map(c=>`
+    <div class="bg-white rounded-2xl p-4 shadow-sm text-center">
+      <div class="text-lg font-bold ${c.color}">${c.val}</div>
+      <div class="text-xs text-gray-400 mt-0.5">${c.label}</div>
+    </div>`).join('');
+}
+
+function filterProducts() {
+  const q      = document.getElementById('productSearch').value.toLowerCase();
+  const sort   = document.getElementById('productSort').value;
+  const trend  = document.getElementById('productTrend').value;
+  const period = parseInt(document.getElementById('productPeriod').value)||0;
+  const cutoff = period ? new Date(Date.now()-period*864e5).toISOString().slice(0,10) : '';
+
+  let filtered = allProducts.filter(p => {
+    if (q && !(p.name||'').toLowerCase().includes(q)) return false;
+    if (trend && getPriceTrend(p) !== trend) return false;
+    if (cutoff && (p.last_date||'').slice(0,10) < cutoff) return false;
+    return true;
+  });
+
+  filtered.sort((a,b) => {
+    if (sort==='count-desc')   return b.purchase_count - a.purchase_count;
+    if (sort==='spent-desc')   return b.total_spent - a.total_spent;
+    if (sort==='savings-desc') return (b.savings||0) - (a.savings||0);
+    if (sort==='name-asc')     return (a.name||'').localeCompare(b.name||'','de');
+    if (sort==='last-desc')    return (b.last_date||'').localeCompare(a.last_date||'');
+    if (sort==='price-desc')   return b.last_price - a.last_price;
+    if (sort==='price-asc')    return a.last_price - b.last_price;
+    return 0;
+  });
+
+  document.getElementById('productCount').textContent =
+    `${filtered.length} von ${allProducts.length} Artikeln`;
+  renderProducts(filtered);
+}
+
+function renderProducts(products) {
+  const el = document.getElementById('productGrid');
+  if (!products.length) {
+    el.className = 'text-center py-16 text-gray-400';
+    el.textContent = 'Keine Artikel gefunden.';
+    return;
+  }
+  el.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3';
+  el.innerHTML = products.map(p => {
+    const trend = getPriceTrend(p);
+    const trendBadge = trend==='up'
+      ? '<span class="text-[11px] bg-red-100 text-red-600 rounded-full px-2 py-0.5 font-semibold">↑ teurer</span>'
+      : trend==='down'
+      ? '<span class="text-[11px] bg-green-100 text-green-600 rounded-full px-2 py-0.5 font-semibold">↓ günstiger</span>'
+      : '';
+    const unit = p.unit ? '/' + esc(p.unit) : '';
+    return `
+      <div class="bg-white rounded-2xl p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+           data-product-id="${esc(p.id)}">
+        <div class="font-semibold text-gray-800 leading-tight line-clamp-2 mb-2" style="min-height:2.6em">
+          ${esc(p.name||p.id)}
+        </div>
+        ${trendBadge?`<div class="mb-2.5">${trendBadge}</div>`:'<div class="mb-2.5 h-5"></div>'}
+        <div class="grid grid-cols-2 gap-1.5 text-center">
+          <div class="bg-gray-50 rounded-xl py-2">
+            <div class="text-base font-bold text-[#003882]">${p.purchase_count}×</div>
+            <div class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Käufe</div>
+          </div>
+          <div class="bg-gray-50 rounded-xl py-2">
+            <div class="text-base font-bold text-green-600">${fmt(p.last_price)}${unit}</div>
+            <div class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Akt. Preis</div>
+          </div>
+          <div class="bg-gray-50 rounded-xl py-2">
+            <div class="text-base font-bold text-gray-700">${fmt(p.avg_price)}${unit}</div>
+            <div class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Ø Preis</div>
+          </div>
+          <div class="bg-gray-50 rounded-xl py-2">
+            <div class="text-base font-bold text-gray-700">${fmt(p.total_spent)}</div>
+            <div class="text-[10px] text-gray-400 uppercase tracking-wide mt-0.5">Gesamt</div>
+          </div>
+        </div>
+        <div class="mt-2.5 text-xs text-gray-400 text-center">${fmtDate(p.last_date)}${p.savings > 0 ? ` · <span class="text-green-600">${fmt(p.savings)} gespart</span>` : ''}</div>
+      </div>`;
+  }).join('');
+}
+
+document.getElementById('productGrid').addEventListener('click', event => {
+  const card = event.target.closest('[data-product-id]');
+  if (card) showProductDetail(card.dataset.productId);
+});
+
+// ── Produkt-Detail Modal ──────────────────────────────────────────────────────
+function showProductDetail(id) {
+  const p = allProducts.find(x => x.id === id);
+  if (!p) return;
+
+  if (chartModal) { chartModal.destroy(); chartModal = null; }
+
+  const trend = getPriceTrend(p);
+  const trendLabel = trend==='up' ? ' ↑ teurer' : trend==='down' ? ' ↓ günstiger' : '';
+  const trendColor = trend==='up' ? 'text-red-500' : trend==='down' ? 'text-green-500' : 'text-gray-500';
+  const unit = p.unit ? '/' + esc(p.unit) : '';
+
+  document.getElementById('modalTitle').textContent = p.name || p.id;
+
+  document.getElementById('modalStats').innerHTML = [
+    {label:'Käufe gesamt',    val:p.purchase_count+'×'},
+    {label:'Menge gesamt',    val:fmtQty(p.total_quantity) + (p.unit ? ' ' + esc(p.unit) : '')},
+    {label:'Ausgaben gesamt', val:fmt(p.total_spent)},
+    {label:'Ø Preis',         val:fmt(p.avg_price) + unit},
+    {label:'Akt. Preis',      val:`<span class="font-bold ${trendColor}">${fmt(p.last_price)}${unit}${trendLabel}</span>`},
+    {label:'Zuletzt',         val:fmtDate(p.last_date)},
+  ].map(s=>`
+    <div class="bg-gray-50 rounded-xl p-2.5 text-center">
+      <div class="text-[10px] text-gray-400 uppercase tracking-wide">${s.label}</div>
+      <div class="font-semibold text-gray-800 mt-0.5 text-sm">${s.val}</div>
+    </div>`).join('');
+  document.getElementById('modalSavings').textContent =
+    p.savings > 0 ? `💰 Mit Rabatten und Coupons gespart: ${fmt(p.savings)}` : '';
+
+  const hist = (p.price_history||[]).filter(h=>h.price>0);
+  const wrapper = document.getElementById('modalChartWrapper');
+
+  if (hist.length > 1) {
+    wrapper.style.display = 'block';
+    chartModal = new Chart(document.getElementById('modalPriceChart'), {
+      type:'line',
+      data:{
+        labels: hist.map(h=>fmtDate(h.date)),
+        datasets:[{
+          label:'Preis (€)',
+          data: hist.map(h=>parseFloat(h.price)),
+          borderColor:'#003882',
+          backgroundColor:'rgba(0,56,130,0.07)',
+          fill:true,
+          tension:0.35,
+          pointRadius:4,
+          pointBackgroundColor:'#003882',
+          pointBorderColor:'#fff',
+          pointBorderWidth:2,
+        }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>` ${fmt(c.raw)}`}}},
+        scales:{
+          y:{ticks:{callback:v=>fmtNum(v)+' €'}, grid:{color:'#f3f4f6'}},
+          x:{grid:{display:false}, ticks:{maxRotation:40, font:{size:11}}}
+        }
+      }
+    });
+  } else {
+    wrapper.style.display = 'none';
+  }
+
+  document.getElementById('modalHistory').innerHTML = hist.length
+    ? hist.slice().reverse().map(h=>`
+        <div class="flex justify-between items-center py-2.5 border-b border-gray-50 text-sm last:border-0">
+          <span class="text-gray-500 shrink-0">${fmtDate(h.date)}</span>
+          <span class="text-gray-400 text-xs truncate mx-3 flex-1">${esc(h.store||'')}</span>
+          ${h.discount ? `<span class="text-green-600 text-xs shrink-0 mr-2">Rabatt ${fmt(h.discount)}</span>` : ''}
+          <span class="font-semibold text-gray-800 shrink-0">${fmt(h.price)}${unit}</span>
+        </div>`).join('')
+    : '<p class="text-center py-4 text-gray-400 text-sm">Keine Preishistorie verfügbar</p>';
+
+  document.getElementById('productModal').classList.add('open');
+}
+
+function closeProductModal() {
+  document.getElementById('productModal').classList.remove('open');
+  if (chartModal) { chartModal.destroy(); chartModal = null; }
+}
+
+function closeLeafletModal() {
+  leafletRequest++; // a leaflet that is still loading is not shown anymore
+  document.getElementById('leafletModal').classList.remove('open');
+}
+
+// A click on the dark background closes the dialog
+function closeModal(e) {
+  if (e.target.id === 'productModal') closeProductModal();
+  else if (e.target.id === 'leafletModal') closeLeafletModal();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  closeProductModal();
+  closeLeafletModal();
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ANGEBOTE
+// ══════════════════════════════════════════════════════════════════════════════
+function renderOfferStores() {
+  const names = new Map((appData.stores || []).map(s => [s.id, s.name]));
+  const stores = (appData.offer_stores || []).map(key => names.get(key) ? `${names.get(key)} (${key})` : key);
+  document.getElementById('offerStores').textContent = stores.length
+    ? `Angebote der Lidl Plus App für: ${stores.join(', ')} · Filialen ändern: Einstellungen → Geräte & Dienste → Lidl Plus → Konfigurieren`
+    : 'Noch keine Filiale bekannt. Wähle eine unter Einstellungen → Geräte & Dienste → Lidl Plus → Konfigurieren.';
+}
+
+function filterOffers() {
+  const q      = document.getElementById('offerSearch').value.toLowerCase().trim();
+  const status = document.getElementById('offerStatus').value;
+  const bought = document.getElementById('offerBought').checked;
+  const offers = allOffers.filter(o => {
+    if (status && o.status !== status) return false;
+    if (bought && !(o.bought_products || []).length) return false;
+    if (q && !`${o.brand||''} ${o.title||''}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  document.getElementById('offerCount').textContent = `${offers.length} von ${allOffers.length} Angeboten`;
+
+  const grid = document.getElementById('offerGrid');
+  if (!offers.length) {
+    grid.className = 'text-center py-16 text-gray-400';
+    grid.textContent = allOffers.length ? 'Keine Angebote gefunden.' : 'Keine Angebote geladen.';
+    return;
+  }
+  grid.className = 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3';
+  grid.innerHTML = offers.map(renderOfferCard).join('');
+}
+
+// Most titles start with the brand already
+function offerName(o) {
+  const brand = o.brand || '', title = o.title || '';
+  return title.toLowerCase().startsWith(brand.toLowerCase()) ? title : `${brand} ${title}`;
+}
+
+function renderOfferCard(o) {
+  const image = safeUrl(o.image);
+  const bought = (o.bought_products || []).map(p => p.name).filter(Boolean);
+  const unitInfo = [o.packaging, o.price_per_unit].filter(Boolean).map(esc).join(' · ');
+  return `<div class="bg-white rounded-2xl shadow-sm overflow-hidden flex flex-col" data-offer-id="${esc(o.id)}">
+    ${image ? `<div class="h-32 flex items-center justify-center p-2 bg-white">
+      <img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="max-h-full max-w-full object-contain"></div>` : ''}
+    <div class="p-3.5 pt-2 flex-1 flex flex-col">
+      <div class="text-[10px] uppercase tracking-wide text-gray-400 truncate">${esc(o.brand)}</div>
+      <div class="font-semibold text-gray-800 leading-tight line-clamp-2">${esc(o.title)}</div>
+      ${unitInfo ? `<div class="text-[11px] text-gray-400 mt-1">${unitInfo}</div>` : ''}
+      <div class="mt-auto pt-2 flex items-end gap-2 flex-wrap">
+        <span class="text-lg font-bold text-[#003882] leading-none">${o.price != null ? fmt(o.price) : esc(o.price_text)}</span>
+        ${o.regular_price ? `<span class="text-xs text-gray-400 line-through">${fmt(o.regular_price)}</span>` : ''}
+        ${o.discount ? `<span class="badge bg-red-100 text-red-600 ml-auto">${esc(o.discount)}</span>` : ''}
+      </div>
+      <div class="mt-2">${validity(o)}</div>
+      ${bought.length ? `<div class="mt-2 text-[11px] bg-blue-50 text-[#003882] rounded-lg px-2 py-1">✓ Schon gekauft: ${esc(bought.join(', '))}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROSPEKTE UND SUCHE
+// ══════════════════════════════════════════════════════════════════════════════
+function renderLeaflets() {
+  const grid = document.getElementById('leafletGrid');
+  if (!allLeaflets.length) {
+    grid.className = 'text-center py-16 text-gray-400';
+    grid.textContent = 'Keine Prospekte geladen.';
+    return;
+  }
+  grid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3';
+  grid.innerHTML = allLeaflets.map(l => {
+    const thumbnail = safeUrl(l.thumbnail), pdf = safeUrl(l.pdf), url = safeUrl(l.url);
+    return `<div class="bg-white rounded-2xl shadow-sm overflow-hidden flex">
+      ${thumbnail ? `<img src="${esc(thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer"
+           class="w-28 shrink-0 object-cover object-top bg-gray-50 cursor-pointer" data-leaflet-id="${esc(l.id)}">` : ''}
+      <div class="p-3.5 flex-1 min-w-0 flex flex-col">
+        <div class="text-[10px] uppercase tracking-wide text-gray-400 truncate">${esc(l.category)}</div>
+        <div class="font-semibold text-gray-800 leading-tight">${esc(l.name)}</div>
+        <div class="text-xs text-gray-500 mt-0.5">${esc(l.title)}</div>
+        <div class="mt-2">${validity(l)}</div>
+        <div class="text-xs text-gray-400 mt-1.5">${esc(l.page_count || 0)} Seiten · ${esc(l.product_count || 0)} Produkte</div>
+        <div class="mt-auto pt-2.5 flex flex-wrap gap-1.5">
+          <button class="btn btn-primary" data-leaflet-id="${esc(l.id)}">Ansehen</button>
+          ${pdf ? `<a class="btn" href="${esc(pdf)}" ${EXTERNAL}>PDF</a>` : ''}
+          ${url ? `<a class="btn" href="${esc(url)}" ${EXTERNAL}>Online</a>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+document.getElementById('leafletGrid').addEventListener('click', event => {
+  const element = event.target.closest('[data-leaflet-id]');
+  if (element) openLeaflet(element.dataset.leafletId);
+});
+
+// Pages and products are loaded when a leaflet is opened
+async function openLeaflet(id) {
+  const summary = allLeaflets.find(l => l.id === id) || {};
+  document.getElementById('leafletTitle').textContent = [summary.name, summary.title].filter(Boolean).join(' · ') || 'Prospekt';
+  const body = document.getElementById('leafletBody');
+  body.innerHTML = '<p class="text-center py-10 text-gray-400">Lade Prospekt…</p>';
+  document.getElementById('leafletModal').classList.add('open');
+  const request = ++leafletRequest;
+  try {
+    const leaflet = await wsCall('lidl_plus/leaflet', {leaflet_id: id});
+    if (request !== leafletRequest) return; // closed or another leaflet opened meanwhile
+    document.getElementById('leafletTitle').textContent = [leaflet.name, leaflet.title].filter(Boolean).join(' · ') || 'Prospekt';
+    body.innerHTML = renderLeafletDetails(leaflet);
+  } catch (err) {
+    if (request !== leafletRequest) return;
+    body.innerHTML = `<p class="text-center py-10 text-red-600">${esc('Prospekt konnte nicht geladen werden: ' + err.message)}</p>`;
+  }
+}
+
+function renderLeafletDetails(l) {
+  const pages = l.pages || [], products = l.products || [];
+  const pdf = safeUrl(l.pdf), url = safeUrl(l.url);
+  return `
+    <div class="flex flex-wrap items-center gap-2 mb-4">
+      ${validity(l)}
+      ${pdf ? `<a class="btn" href="${esc(pdf)}" ${EXTERNAL}>📄 PDF</a>` : ''}
+      ${url ? `<a class="btn" href="${esc(url)}" ${EXTERNAL}>🌐 Online ansehen</a>` : ''}
+    </div>
+    ${products.length ? `<h3 class="section-title">Produkte (${products.length})</h3>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-5">${products.map(renderLeafletProduct).join('')}</div>` : ''}
+    ${pages.length ? `<h3 class="section-title">Seiten (${pages.length})</h3>
+      <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">${pages.map(renderPage).join('')}</div>`
+      : '<p class="text-center py-6 text-gray-400">Für diesen Prospekt sind keine Seiten gespeichert.</p>'}`;
+}
+
+function renderPage(page) {
+  const image = safeUrl(page.image), preview = safeUrl(page.thumbnail) || image;
+  const label = `<div class="text-[11px] text-gray-400 text-center mt-0.5">Seite ${esc(page.number)}</div>`;
+  if (!image) return `<div>${label}</div>`;
+  return `<a href="${esc(image)}" ${EXTERNAL} title="${esc(page.description)}" class="block">
+    <img src="${esc(preview)}" alt="${esc(page.description)}" loading="lazy" referrerpolicy="no-referrer"
+         class="w-full rounded-lg border border-gray-100 bg-gray-50">${label}</a>`;
+}
+
+function renderLeafletProduct(p) {
+  const image = safeUrl(p.image), url = safeUrl(p.url);
+  const pages = (p.pages || []).map(esc).join(', ');
+  const inner = `${image ? `<img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="h-24 w-full object-contain mb-1.5">` : ''}
+    <div class="text-[10px] uppercase text-gray-400 truncate">${esc(p.brand)}</div>
+    <div class="text-xs font-semibold text-gray-800 line-clamp-2">${esc(p.title)}</div>
+    <div class="flex items-baseline justify-between mt-1">
+      <span class="text-sm font-bold text-[#003882]">${p.price != null ? fmt(p.price) : ''}</span>
+      ${pages ? `<span class="text-[10px] text-gray-400">S. ${pages}</span>` : ''}
+    </div>`;
+  return url
+    ? `<a href="${esc(url)}" ${EXTERNAL} class="block bg-gray-50 rounded-xl p-2 hover:bg-gray-100">${inner}</a>`
+    : `<div class="bg-gray-50 rounded-xl p-2">${inner}</div>`;
+}
+
+// Search in the articles bought before, the offers and the pages and products of the leaflets
+async function searchAll(event) {
+  if (event) event.preventDefault();
+  const query = document.getElementById('globalSearch').value.trim();
+  const box = document.getElementById('searchResults');
+  if (!query) {
+    clearSearch();
+    return;
+  }
+  box.classList.remove('hidden');
+  box.innerHTML = '<p class="text-gray-400 py-2">Suche…</p>';
+  const request = ++searchRequest;
+  try {
+    const result = await wsCall('lidl_plus/search', {query});
+    if (request === searchRequest) box.innerHTML = renderSearchResults(result || {}, query);
+  } catch (err) {
+    if (request === searchRequest) box.innerHTML = `<p class="text-red-600 py-2">${esc('Suche fehlgeschlagen: ' + err.message)}</p>`;
+  }
+}
+
+function clearSearch() {
+  searchRequest++;
+  const box = document.getElementById('searchResults');
+  box.classList.add('hidden');
+  box.innerHTML = '';
+}
+
+function renderSearchResults(result, query) {
+  const products = result.products || [], offers = result.offers || [], leaflets = result.leaflets || [];
+  if (!products.length && !offers.length && !leaflets.length) {
+    return `<p class="text-gray-400 py-2">Nichts gefunden für „${esc(query)}“.</p>`;
+  }
+  const section = (title, content) => `<h3 class="section-title mt-3">${title}</h3>${content}`;
+  let html = '';
+  if (offers.length) {
+    html += section('🏷️ Angebote deiner Filialen', offers.map(o => `
+      <div class="flex items-center gap-3 py-1.5 border-b border-gray-50 last:border-0">
+        <span class="flex-1 min-w-0 truncate">${esc(offerName(o))}</span>
+        <span class="shrink-0 font-semibold text-[#003882]">${o.price != null ? fmt(o.price) : esc(o.price_text)}</span>
+        <span class="shrink-0">${validity(o)}</span>
+      </div>`).join(''));
+  }
+  if (products.length) {
+    html += section('🧾 In deinen Einkäufen', products.map(p => `
+      <div class="flex items-center gap-3 py-1.5 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50" data-product-id="${esc(p.id)}">
+        <span class="flex-1 min-w-0 truncate">${esc(p.name)}</span>
+        <span class="shrink-0 text-xs text-gray-400">${esc(p.purchase_count)}× · zuletzt ${fmtDate(p.last_date)}</span>
+        <span class="shrink-0 font-semibold">${fmt(p.last_price)}</span>
+      </div>`).join(''));
+  }
+  if (leaflets.length) {
+    html += section('📰 In Prospekten', leaflets.map(entry => {
+      const l = entry.leaflet || {};
+      const pages = entry.pages || [], products = entry.products || [];
+      return `<div class="border border-gray-100 rounded-xl p-3 mb-2">
+        <div class="flex flex-wrap items-center gap-2 mb-2">
+          <button class="font-semibold text-[#003882] hover:underline text-left" data-leaflet-id="${esc(l.id)}">${esc([l.name, l.title].filter(Boolean).join(' · '))}</button>
+          ${validity(l)}
+        </div>
+        ${pages.length ? `<div class="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2 mb-2">${pages.map(renderPage).join('')}</div>` : ''}
+        ${products.length ? `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">${products.map(renderLeafletProduct).join('')}</div>` : ''}
+      </div>`;
+    }).join(''));
+  }
+  return html;
+}
+
+document.getElementById('searchResults').addEventListener('click', event => {
+  const leaflet = event.target.closest('button[data-leaflet-id]');
+  if (leaflet) return openLeaflet(leaflet.dataset.leafletId);
+  const product = event.target.closest('[data-product-id]');
+  if (product) showProductDetail(product.dataset.productId);
+});
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+if (window.parent === window) {
+  showError('Diese Seite funktioniert nur als Home-Assistant-Panel (Seitenleiste → Lidl Plus).');
+} else {
+  requestData();
+  setInterval(requestData, REFRESH_INTERVAL_MS);
+}
+</script>
+</body>
+</html>

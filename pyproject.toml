@@ -1,0 +1,10 @@
+[tool.black]
+line-length = 120
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+# Needed by the Home Assistant tests (tests/ha), without pytest-asyncio these options are unknown
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore:Unknown config option:pytest.PytestConfigWarning"]

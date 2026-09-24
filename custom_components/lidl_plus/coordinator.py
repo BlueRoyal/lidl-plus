@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from collections.abc import Callable
+from datetime import timedelta
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
+from ._lidlplus import analytics, export
+from ._lidlplus.api import LidlPlusApi
+from ._lidlplus.exceptions import LoginError, MissingLogin
 from .const import (
+    CONF_OFFER_STORES,
+    CONF_REFRESH_TOKEN,
     DEFAULT_SCAN_INTERVAL_HOURS,
     DOMAIN,
     FREQUENTLY_BOUGHT_LIMIT,
@@ -21,61 +30,148 @@ from .const import (
     KEY_COUPONS_ACTIVATED,
     KEY_COUPONS_AVAILABLE,
     KEY_CURRENT_MONTH_SPENDING,
+    KEY_CURRENT_MONTH_START,
+    KEY_DATA_VERSION,
     KEY_FREQUENTLY_BOUGHT,
-    KEY_LAST_SYNC,
     KEY_LAST_ERROR,
+    KEY_LAST_SYNC,
+    KEY_LEAFLETS,
+    KEY_LOG,
     KEY_LOYALTY_ID,
     KEY_NEW_TICKETS_LAST_SYNC,
+    KEY_OFFER_STORES,
+    KEY_OFFERS,
+    KEY_OFFERS_CURRENT,
+    KEY_OFFERS_FOR_YOU,
+    KEY_OFFERS_UPCOMING,
     KEY_PRICE_CHANGES,
     KEY_PRODUCTS,
     KEY_RECEIPTS,
     KEY_RESTOCK_SUGGESTIONS,
+    KEY_SAVINGS_BY_MONTH,
+    KEY_SAVINGS_MONTH,
+    KEY_SAVINGS_TOTAL,
     KEY_SHOPPING_FREQUENCY,
     KEY_SPENDING_BY_MONTH,
     KEY_SPENDING_BY_STORE,
+    KEY_STORES,
+    KEY_TOTAL_SPENT,
     KEY_TOTAL_TICKETS,
-    TAX_TYPE_FOOD,
-    TAX_TYPE_NONFOOD,
+    LOG_LENGTH,
+    PRICE_HISTORY_LENGTH,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-
-def _parse_price(price_str: str) -> float:
-    """Convert German decimal string '1,49' or '1.49' to float."""
-    try:
-        return float(str(price_str).replace(",", "."))
-    except (ValueError, AttributeError):
-        return 0.0
+type LidlPlusConfigEntry = ConfigEntry[LidlPlusCoordinator]
 
 
-def _coupon_is_activated(coupon: dict) -> bool:
-    """Check multiple possible activated-flag keys across API versions."""
-    return bool(
-        coupon.get("activated")
-        or coupon.get("isActivated")
-        or coupon.get("isActive")
-    )
+def _detect_price_changes(products: list[dict], frequently_bought: list[dict]) -> list[dict]:
+    """Compare the last two prices of the most frequently bought articles."""
+    by_id = {product["id"]: product for product in products}
+    changes = []
+    for entry in frequently_bought:
+        history = by_id.get(entry["id"], {}).get("price_history", [])
+        if len(history) < 2:
+            continue
+        previous, current = history[-2], history[-1]
+        if current["price"] == previous["price"]:
+            continue
+        changes.append(
+            {
+                "id": entry["id"],
+                "name": entry["name"],
+                "prev_price": previous["price"],
+                "curr_price": current["price"],
+                "change_pct": round((current["price"] - previous["price"]) / previous["price"] * 100, 1),
+                "date": current["date"],
+                "store": current["store"],
+            }
+        )
+    # Largest absolute change first
+    changes.sort(key=lambda change: abs(change["change_pct"]), reverse=True)
+    return changes
+
+
+def _build_receipts(tickets: list[dict]) -> list[dict]:
+    """All receipts with their articles and details, newest first."""
+    receipts = []
+    for ticket in tickets:
+        store = ticket.get("store") or {}
+        details = ticket.get("_receipt") or {}
+        items = ticket.get("_items") or []
+        locality = " ".join(filter(None, [store.get("postalCode"), store.get("locality")]))
+        receipts.append(
+            {
+                "id": ticket.get("id") or "",
+                "date": ticket.get("date") or "",
+                "store": store.get("name") or "",
+                "store_id": store.get("id") or "",
+                "store_address": ", ".join(filter(None, [store.get("address"), locality])),
+                "total": analytics.to_float(ticket.get("totalAmount")),
+                "savings": analytics.total_savings(items),
+                "deposit_returns": details.get("deposit_returns") or [],
+                "payments": details.get("payments") or [],
+                "points": (ticket.get("collectingModel") or {}).get("points"),
+                "coupons_used": ticket.get("couponsUsed") or [],
+                "items": items,
+            }
+        )
+    receipts.sort(key=lambda receipt: receipt["date"], reverse=True)
+    return receipts
+
+
+def active_offers(data: dict[str, Any]) -> list[dict]:
+    """Current and upcoming offers with their status of now, the data of the last update may be hours old"""
+    offers = [{**offer, "status": analytics.offer_status(offer)} for offer in data.get(KEY_OFFERS, [])]
+    return [offer for offer in offers if offer["status"] != "expired"]
+
+
+def active_leaflets(data: dict[str, Any]) -> list[dict]:
+    """Current and upcoming leaflets with their status of today (in the time zone of Home Assistant)"""
+    today = dt_util.now().date()
+    leaflets = [
+        {**leaflet, "status": analytics.leaflet_status(leaflet, today)} for leaflet in data.get(KEY_LEAFLETS, [])
+    ]
+    return [leaflet for leaflet in leaflets if leaflet["status"] != "expired"]
+
+
+def search_data(data: dict[str, Any], query: str) -> dict[str, list]:
+    """Articles bought before, offers and leaflet pages or products that contain every word of the query"""
+    words = query.lower().split()
+
+    def matches(text: str) -> bool:
+        return bool(words) and all(word in text.lower() for word in words)
+
+    return {
+        "products": [product for product in data.get(KEY_PRODUCTS, []) if matches(product["name"])],
+        "offers": [offer for offer in active_offers(data) if matches(f"{offer['brand']} {offer['title']}")],
+        "leaflets": analytics.search_leaflets(active_leaflets(data), query),
+    }
 
 
 class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Fetch and process all Lidl Plus data on a fixed interval."""
 
-    def __init__(self, hass: HomeAssistant, api: Any) -> None:
+    config_entry: LidlPlusConfigEntry
+
+    def __init__(self, hass: HomeAssistant, config_entry: LidlPlusConfigEntry, api: LidlPlusApi) -> None:
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=config_entry,
             name=DOMAIN,
             update_interval=timedelta(hours=DEFAULT_SCAN_INTERVAL_HOURS),
         )
         self.api = api
-        self._log_entries: deque = deque(maxlen=50)  # last 50 entries
+        self._log_entries: deque[str] = deque(maxlen=LOG_LENGTH)
+        # Refresh token that was last written to the config entry by this coordinator
+        self._stored_token = api.refresh_token
 
     def _log(self, level: str, message: str) -> None:
         """Log to HA logger and keep entry in internal log."""
-        ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        entry = f"[{ts}] {level}: {message}"
-        self._log_entries.append(entry)
+        timestamp = dt_util.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._log_entries.append(f"[{timestamp}] {level}: {message}")
         if level == "ERROR":
             _LOGGER.error(message)
         elif level == "WARNING":
@@ -83,198 +179,208 @@ class LidlPlusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             _LOGGER.debug(message)
 
+    async def async_call_api[_T](self, func: Callable[..., _T], *args: Any) -> _T:
+        """Run a blocking API call in the executor and keep a rotated refresh token."""
+        try:
+            return await self.hass.async_add_executor_job(func, *args)
+        finally:
+            self._async_store_refresh_token()
+
+    @callback
+    def _async_store_refresh_token(self) -> None:
+        """Persist the refresh token, the auth server may replace it on every renewal."""
+        token = self.api.refresh_token
+        # Only write tokens renewed by this client, a config flow may have stored a newer one meanwhile
+        if token and token != self._stored_token:
+            self._stored_token = token
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, data={**self.config_entry.data, CONF_REFRESH_TOKEN: token}
+            )
+
     async def _async_update_data(self) -> dict[str, Any]:
         self._log("INFO", "Sync gestartet")
         try:
-            data = await self.hass.async_add_executor_job(self._fetch_all)
-            data[KEY_LAST_ERROR] = None
-            data["log"] = list(self._log_entries)
-            self._log("INFO", f"Sync erfolgreich — {data.get('new_tickets_last_sync', 0)} neue Kassenbons")
-            data["log"] = list(self._log_entries)
-            return data
-        except Exception as exc:
-            error_msg = str(exc)
+            data = await self.async_call_api(self._fetch_all)
+        except (LoginError, MissingLogin) as exc:
+            self._log("ERROR", f"Anmeldung fehlgeschlagen: {exc}")
+            raise ConfigEntryAuthFailed(f"Lidl Plus refresh token rejected: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001
+            error_msg = str(exc) or type(exc).__name__
             self._log("ERROR", f"Sync fehlgeschlagen: {error_msg}")
+            # Keep showing the last data, the error is exposed by the "Last Error" sensor
             if self.data:
-                return {**self.data, KEY_LAST_ERROR: error_msg, "log": list(self._log_entries)}
+                return {**self.data, KEY_LAST_ERROR: error_msg, KEY_LOG: list(self._log_entries)}
             raise UpdateFailed(f"Lidl Plus: {error_msg}") from exc
+        if data[KEY_LAST_ERROR]:
+            self._log("ERROR", f"Sync fehlgeschlagen, Kassenbons aus dem Cache: {data[KEY_LAST_ERROR]}")
+        else:
+            self._log("INFO", f"Sync erfolgreich — {data[KEY_NEW_TICKETS_LAST_SYNC]} neue Kassenbons")
+        data[KEY_LOG] = list(self._log_entries)
+        return data
 
     def _fetch_all(self) -> dict[str, Any]:
-        # 1. Sync new tickets into cache
-        new_count: int = self.api.sync()
-        self._log("INFO", f"Tickets synchronisiert: {new_count} neu")
+        previous = self.data or {}
+        # 1. Sync new tickets into the cache
+        sync_error: Exception | None = None
+        new_count = 0
+        try:
+            new_count = self.api.sync()
+        except (LoginError, MissingLogin):
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # Lidl is not reachable: continue with the receipts in the cache
+            sync_error = exc
+        else:
+            self._log("INFO", f"Tickets synchronisiert: {new_count} neu")
+        cache = self.api.cached_data()
+        tickets = list(cache["tickets"].values())
+        if sync_error is not None and not tickets:
+            raise sync_error
+        items = analytics.ticket_items(tickets)
+        stores = analytics.visited_stores(tickets)
 
-        # 2. Core analytics — compute spending ourselves to handle string amounts
-        tickets = self.api.cached_tickets()
-        all_items = self.api.all_ticket_items()
-        freq_bought = self.api.frequently_bought(FREQUENTLY_BOUGHT_LIMIT)
-        restock = self.api.restock_suggestions()
-        freq_days = self.api.shopping_frequency_days()
-
-        # spending_by_month / average_basket / current_month via _parse_price
-        # so that string amounts like "1,19" are handled correctly
-        from collections import defaultdict as _dd
-        _by_month: dict = _dd(float)
-        _by_store: dict = _dd(float)
-        for t in tickets:
-            amount = _parse_price(t.get("totalAmount", "0"))
-            month = (t.get("date") or "")[:7]
-            store = (t.get("store") or {}).get("name", "Unknown")
-            if month:
-                _by_month[month] = round(_by_month[month] + amount, 2)
-            _by_store[store] = round(_by_store[store] + amount, 2)
-
-        by_month = dict(sorted(_by_month.items()))
-        by_store = dict(sorted(_by_store.items(), key=lambda x: x[1], reverse=True))
-
-        from datetime import datetime as _dt
-        _cur_month = _dt.utcnow().strftime("%Y-%m")
-        current_month = by_month.get(_cur_month, 0.0)
-        avg_basket = (
-            round(sum(by_month.values()) / len(tickets), 2) if tickets else 0.0
-        )
-
-        # 3. Price change detection — compare last two prices for each top item
-        price_changes: list[dict] = []
-        for item in freq_bought:
-            history = self.api.price_history(item["id"])
-            if len(history) < 2:
-                continue
-            # Find last two entries that actually have a unit_price
-            priced = [h for h in history if h.get("unit_price")]
-            if len(priced) < 2:
-                continue
-            prev_price = _parse_price(priced[-2]["unit_price"])
-            curr_price = _parse_price(priced[-1]["unit_price"])
-            if curr_price != prev_price and prev_price > 0:
-                change_pct = round((curr_price - prev_price) / prev_price * 100, 1)
-                price_changes.append({
-                    "id": item["id"],
-                    "name": item["name"],
-                    "prev_price": prev_price,
-                    "curr_price": curr_price,
-                    "change_pct": change_pct,
-                    "date": priced[-1].get("date", ""),
-                    "store": priced[-1].get("store", ""),
-                })
-        # Sort: largest absolute change first
-        price_changes.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
-
-        # 4. Category spending via tax_type (A=19% non-food, B=7% food)
-        food_total = 0.0
-        nonfood_total = 0.0
-        for item in all_items:
-            line_total = _parse_price(item.get("unit_price", "0")) * item.get("quantity", 1)
-            tax = item.get("tax_type", "")
-            if tax == TAX_TYPE_FOOD:
-                food_total += line_total
-            elif tax == TAX_TYPE_NONFOOD:
-                nonfood_total += line_total
-
-        # 5. Produkt-Übersicht — alle Artikel mit vollständiger Statistik
-        from collections import defaultdict as _ddict
-        _prod: dict = _ddict(lambda: {
-            "name": "", "purchase_count": 0, "total_quantity": 0.0,
-            "total_spent": 0.0, "last_date": "", "last_store": "",
-            "last_price": 0.0, "prices": [],
-        })
-        for item in all_items:
-            pid = item["id"]
-            price = _parse_price(item.get("unit_price", "0"))
-            qty = float(item.get("quantity", 1))
-            p = _prod[pid]
-            p["name"] = item.get("name") or p["name"]
-            p["purchase_count"] += 1
-            p["total_quantity"] = round(p["total_quantity"] + qty, 3)
-            p["total_spent"] = round(p["total_spent"] + price * qty, 2)
-            if item.get("date", "") > p["last_date"]:
-                p["last_date"] = item.get("date", "")
-                p["last_store"] = item.get("store", "")
-                p["last_price"] = price
-            if price > 0:
-                p["prices"].append({
-                    "date": item.get("date", ""),
-                    "price": price,
-                    "store": item.get("store", ""),
-                })
-
-        # Compute avg_price, sort price history, keep last 20 prices per product
-        products_list = []
-        for pid, p in _prod.items():
-            prices_sorted = sorted(p["prices"], key=lambda x: x["date"])[-20:]
-            avg = round(p["total_spent"] / p["total_quantity"], 2) if p["total_quantity"] else 0.0
-            products_list.append({
-                "id": pid,
-                "name": p["name"],
-                "purchase_count": p["purchase_count"],
-                "total_quantity": p["total_quantity"],
-                "total_spent": p["total_spent"],
-                "avg_price": avg,
-                "last_price": p["last_price"],
-                "last_date": p["last_date"],
-                "last_store": p["last_store"],
-                "price_history": prices_sorted,
-            })
-        # Sort by total purchase count descending
-        products_list.sort(key=lambda x: x["purchase_count"], reverse=True)
-        self._log("INFO", f"Produkte indexiert: {len(products_list)} einzigartige Artikel")
-
-        # 6. Kassenbons mit Produkten — letzte 50 vollständig
-        receipts_list = []
-        for t in sorted(tickets, key=lambda x: x.get("date", ""), reverse=True)[:50]:
-            receipts_list.append({
-                "id": t.get("id", ""),
-                "date": t.get("date", ""),
-                "store": (t.get("store") or {}).get("name", ""),
-                "total": _parse_price(t.get("totalAmount", "0")),
-                "items": t.get("_items", []),
-            })
-
+        # 2. Articles, receipts and price changes
+        frequently_bought = analytics.frequently_bought(items, FREQUENTLY_BOUGHT_LIMIT)
+        products = analytics.product_summary(items, PRICE_HISTORY_LENGTH)
+        price_changes = _detect_price_changes(products, frequently_bought)
+        now = dt_util.now()
+        restock = analytics.restock_suggestions(items, now=now)
+        self._log("INFO", f"Produkte indexiert: {len(products)} einzigartige Artikel")
         self._log("INFO", f"Preisänderungen erkannt: {len(price_changes)}")
         self._log("INFO", f"Nachkauf-Vorschläge: {len(restock)}")
 
-        # 5. Coupons (live API call — separate endpoint)
-        all_coupons: list[dict] = []
-        try:
-            coupons_raw = self.api.coupons()
-            # API may return a list directly or a sectioned dict
-            if isinstance(coupons_raw, list):
-                all_coupons = coupons_raw
-            elif isinstance(coupons_raw, dict):
-                for section in coupons_raw.get("sections", []):
-                    all_coupons.extend(section.get("coupons", []))
-            self._log("INFO", f"Coupons geladen: {len(all_coupons)}")
-        except Exception as e:  # noqa: BLE001
-            self._log("WARNING", f"Coupons konnten nicht geladen werden: {e}")
+        # 3. Spending and savings
+        by_month = analytics.spending_by_month(tickets)
+        categories = analytics.category_spending(items)
+        savings_by_month = analytics.savings_by_month(items)
+        month = now.strftime("%Y-%m")
 
-        activated = sum(1 for c in all_coupons if _coupon_is_activated(c))
-        available = len(all_coupons) - activated
+        # 4. Offers of the chosen stores and leaflets, public data that is independent of the login
+        offer_stores = self._offer_store_keys(stores)
+        if self._sync_public_data(offer_stores):
+            cache = self.api.cached_data()
+        offers = analytics.mark_bought_offers(
+            [
+                offer
+                for offer in analytics.archived_offers(cache.get("offers"))
+                if offer["status"] != "expired" and set(offer["stores"]) & set(offer_stores)
+            ],
+            items,
+        )
+        # Leaflets that have not ended, with pages and products; the older ones stay in the cache
+        leaflets = [
+            leaflet
+            for leaflet in analytics.archived_leaflets(cache.get("leaflets"), now.date())
+            if leaflet["status"] != "expired"
+        ]
 
-        # 6. Loyalty ID (rarely changes — tolerate failure)
-        loyalty_id: str | None = None
-        try:
-            loyalty_id = self.api.loyalty_id()
-        except Exception:  # noqa: BLE001
-            _LOGGER.debug("Could not fetch loyalty ID, skipping")
+        # 5. Coupons and loyalty ID (separate endpoints, failures are tolerated)
+        if sync_error is None:
+            coupons = self._fetch_coupons()
+            loyalty_id = self._fetch_loyalty_id()
+        else:
+            coupons = previous.get(KEY_COUPONS, [])
+            loyalty_id = previous.get(KEY_LOYALTY_ID)
+        activated = sum(1 for coupon in coupons if analytics.coupon_is_activated(coupon))
 
         return {
-            KEY_CURRENT_MONTH_SPENDING:    round(current_month, 2),
-            KEY_AVERAGE_BASKET:            avg_basket,
-            KEY_SHOPPING_FREQUENCY:        freq_days,
-            KEY_SPENDING_BY_MONTH:         by_month,
-            KEY_SPENDING_BY_STORE:         by_store,
-            KEY_FREQUENTLY_BOUGHT:         freq_bought,
-            KEY_RESTOCK_SUGGESTIONS:       restock,
-            KEY_PRICE_CHANGES:             price_changes,
-            KEY_CATEGORY_FOOD_SPENDING:    round(food_total, 2),
-            KEY_CATEGORY_NONFOOD_SPENDING: round(nonfood_total, 2),
-            KEY_TOTAL_TICKETS:             len(tickets),
-            KEY_COUPONS:                   all_coupons,
-            KEY_COUPONS_AVAILABLE:         available,
-            KEY_COUPONS_ACTIVATED:         activated,
-            KEY_LAST_SYNC:                 datetime.now(tz=timezone.utc).isoformat(),
-            KEY_NEW_TICKETS_LAST_SYNC:     new_count,
-            KEY_LOYALTY_ID:                loyalty_id,
-            KEY_PRODUCTS:                  products_list,
-            KEY_RECEIPTS:                  receipts_list,
+            KEY_CURRENT_MONTH_SPENDING: by_month.get(month, 0.0),
+            KEY_CURRENT_MONTH_START: dt_util.start_of_local_day(now.replace(day=1)).isoformat(),
+            KEY_AVERAGE_BASKET: analytics.average_basket(tickets),
+            KEY_SHOPPING_FREQUENCY: analytics.shopping_frequency_days(tickets),
+            KEY_SPENDING_BY_MONTH: by_month,
+            KEY_SPENDING_BY_STORE: analytics.spending_by_store(tickets),
+            KEY_TOTAL_SPENT: analytics.total_spending(tickets),
+            KEY_FREQUENTLY_BOUGHT: frequently_bought,
+            KEY_RESTOCK_SUGGESTIONS: restock,
+            KEY_PRICE_CHANGES: price_changes,
+            KEY_CATEGORY_FOOD_SPENDING: categories["reduced"],
+            KEY_CATEGORY_NONFOOD_SPENDING: categories["standard"],
+            KEY_SAVINGS_TOTAL: analytics.total_savings(items),
+            KEY_SAVINGS_MONTH: savings_by_month.get(month, 0.0),
+            KEY_SAVINGS_BY_MONTH: savings_by_month,
+            KEY_TOTAL_TICKETS: len(tickets),
+            KEY_STORES: stores,
+            KEY_OFFER_STORES: offer_stores,
+            KEY_OFFERS: offers,
+            KEY_OFFERS_CURRENT: sum(1 for offer in offers if offer["status"] == "current"),
+            KEY_OFFERS_UPCOMING: sum(1 for offer in offers if offer["status"] == "upcoming"),
+            KEY_OFFERS_FOR_YOU: [offer for offer in offers if offer["bought_products"]],
+            KEY_LEAFLETS: leaflets,
+            KEY_DATA_VERSION: dt_util.utcnow().isoformat(),
+            KEY_COUPONS: coupons,
+            KEY_COUPONS_AVAILABLE: len(coupons) - activated,
+            KEY_COUPONS_ACTIVATED: activated,
+            KEY_LAST_SYNC: dt_util.utcnow().isoformat() if sync_error is None else previous.get(KEY_LAST_SYNC),
+            KEY_LAST_ERROR: None if sync_error is None else (str(sync_error) or type(sync_error).__name__),
+            KEY_NEW_TICKETS_LAST_SYNC: new_count,
+            KEY_LOYALTY_ID: loyalty_id,
+            KEY_PRODUCTS: products,
+            KEY_RECEIPTS: _build_receipts(tickets),
         }
+
+    def _offer_store_keys(self, stores: list[dict]) -> list[str]:
+        """Stores chosen in the options, otherwise the most visited store of the receipts"""
+        if configured := self.config_entry.options.get(CONF_OFFER_STORES):
+            return list(configured)
+        return [stores[0]["id"]] if stores and stores[0]["id"] else []
+
+    def _sync_public_data(self, store_keys: list[str]) -> bool:
+        """Add the offers of the stores and the leaflets to the cache, True if anything was added"""
+        synced = False
+        if store_keys:
+            try:
+                new_offers = self.api.sync_offers(store_keys)
+            except Exception as exc:  # noqa: BLE001
+                self._log("WARNING", f"Angebote konnten nicht geladen werden: {exc}")
+            else:
+                self._log("INFO", f"Angebote geladen: {new_offers} neu")
+                synced = True
+        try:
+            new_leaflets = self.api.sync_leaflets()
+        except Exception as exc:  # noqa: BLE001
+            self._log("WARNING", f"Prospekte konnten nicht geladen werden: {exc}")
+        else:
+            self._log("INFO", f"Prospekte geladen: {new_leaflets} neu")
+            synced = True
+        return synced
+
+    async def async_all_offers(self) -> list[dict]:
+        """All offers of the cache, also the ones that ended, marked with the articles bought before"""
+        offers = await self.hass.async_add_executor_job(self.api.cached_offers)
+        items = [item for receipt in (self.data or {}).get(KEY_RECEIPTS, []) for item in receipt["items"]]
+        return analytics.mark_bought_offers(offers, items)
+
+    async def async_all_leaflets(self) -> list[dict]:
+        """All leaflets of the cache, also the ones that ended"""
+        return await self.hass.async_add_executor_job(self.api.cached_leaflets, dt_util.now().date())
+
+    async def async_leaflet(self, leaflet_id: str) -> dict | None:
+        """A leaflet with its pages and products, None if it is not in the cache"""
+        for leaflet in active_leaflets(self.data or {}):
+            if leaflet["id"] == leaflet_id:
+                return leaflet
+        return next((leaflet for leaflet in await self.async_all_leaflets() if leaflet["id"] == leaflet_id), None)
+
+    async def async_export(self, dataset: str, file_format: str) -> bytes:
+        """Export file of the cache, see export.export_file"""
+        return await self.hass.async_add_executor_job(self._export, dataset, file_format)
+
+    def _export(self, dataset: str, file_format: str) -> bytes:
+        return export.export_file(self.api.cached_data(), dataset, file_format, dt_util.now().date())
+
+    def _fetch_coupons(self) -> list[dict]:
+        try:
+            coupons = analytics.section_entries(self.api.coupons(), "coupons")
+        except Exception as exc:  # noqa: BLE001
+            self._log("WARNING", f"Coupons konnten nicht geladen werden: {exc}")
+            return (self.data or {}).get(KEY_COUPONS, [])
+        self._log("INFO", f"Coupons geladen: {len(coupons)}")
+        return coupons
+
+    def _fetch_loyalty_id(self) -> str | None:
+        try:
+            return self.api.loyalty_id() or None
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("Could not fetch loyalty ID, keeping the previous one", exc_info=True)
+            return (self.data or {}).get(KEY_LOYALTY_ID)

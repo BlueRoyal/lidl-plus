@@ -1,0 +1,11 @@
+{
+  "name": "lidl-plus-frontend-tests",
+  "private": true,
+  "description": "Runtime tests of the Home Assistant panel in custom_components/lidl_plus/frontend",
+  "scripts": {
+    "test": "node panel_element.test.js && node panel_page.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.1"
+  }
+}

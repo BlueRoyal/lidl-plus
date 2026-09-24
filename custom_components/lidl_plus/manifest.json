@@ -1,0 +1,12 @@
+{
+  "domain": "lidl_plus",
+  "name": "Lidl Plus",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/Andre0512/lidl-plus",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": ["requests>=2.28.0"],
+  "version": "1.2.0"
+}
