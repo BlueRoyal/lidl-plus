@@ -429,9 +429,12 @@ let chartMonthly, chartCategory, chartStores, chartModal;
 let callCounter = 0, leafletRequest = 0, searchRequest = 0;
 const pendingCalls = new Map();
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-// Version of this page. The panel element opens it with its own version (?v=), they differ when Home Assistant still
-// has the element of an older version loaded after an update: then new commands of the page may be unknown to it
-const PAGE_VERSION = '1.3.1';
+// Version of this page. After an update Home Assistant may still have the panel element of an older version loaded,
+// which does not know the new commands of the page
+const PAGE_VERSION = '1.3.2';
+// The version of the panel element and whether the Home Assistant app offers its barcode scanner, told by the element
+// before the data (elements before 1.3.2 tell nothing)
+let panelInfo = null;
 const CALL_TIMEOUT_MS = 60 * 1000;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -500,6 +503,7 @@ window.addEventListener('message', event => {
   if (msg.type === 'lidl-plus:data') applyData(msg.data || {});
   else if (msg.type === 'lidl-plus:error') showError('Daten konnten nicht geladen werden: ' + (msg.message || 'unbekannter Fehler'));
   else if (msg.type === 'lidl-plus:menu') document.getElementById('menuBtn').classList.toggle('hidden', !msg.visible);
+  else if (msg.type === 'lidl-plus:panel') panelInfo = msg;
   else if (msg.type === 'lidl-plus:result') settleCall(msg);
 });
 
@@ -536,10 +540,9 @@ function showReloadHint() {
   document.getElementById('reloadBanner').classList.remove('hidden');
 }
 
-// True if the panel element that opened this page belongs to another version
-function outdatedPanel() {
-  const loaded = new URLSearchParams(location.search).get('v');
-  return Boolean(loaded) && loaded !== PAGE_VERSION;
+// True if Home Assistant has the panel element of another version loaded
+function panelOutdated() {
+  return !panelInfo || panelInfo.version !== PAGE_VERSION;
 }
 
 // Websocket command of the integration for the account shown
@@ -575,6 +578,7 @@ function applyData(data) {
   updateAccountSelect(accounts);
 
   document.getElementById('errorBanner').classList.add('hidden');
+  if (panelOutdated()) showReloadHint();
   const warning = document.getElementById('syncWarning');
   warning.textContent = data.last_error ? '⚠️ Letzte Synchronisierung fehlgeschlagen: ' + data.last_error : '';
   warning.classList.toggle('hidden', !data.last_error);
@@ -1660,12 +1664,16 @@ async function openScanner(forArticle = false) {
   document.getElementById('scanInput').value = '';
   document.getElementById('scanHint').textContent = '';
   document.getElementById('scanModal').classList.add('open');
-  // An older panel element knows no scanner and would never answer
-  if (outdatedPanel()) {
-    document.getElementById('scanHint').textContent =
-      'Der Scanner der App öffnet sich erst, wenn du Home Assistant einmal neu geladen hast (siehe Hinweis oben). Bis dahin kannst du den Barcode eintippen.';
+  // Without the scanner of the app: 2. the camera of the browser, 3. typing the digits below the bars
+  if (panelInfo && !panelInfo.scanner) {
+    startCamera(request, panelInfo.app ? 'Deine Home-Assistant-App bietet keinen Barcode-Scanner an, bitte aktualisiere die App.' : '');
     document.getElementById('scanInput').focus();
     return;
+  }
+  // Elements before 1.3.2 tell nothing about the scanner: the ones of 1.3.0 and 1.3.1 open it, older ones never answer
+  if (!panelInfo) {
+    document.getElementById('scanHint').textContent =
+      'Öffnet sich der Scanner der App nicht, schließe die Home-Assistant-App ganz und öffne sie neu. Bis dahin kannst du den Barcode eintippen.';
   }
   // 1. The barcode scanner of the Home Assistant app
   let result;
@@ -1685,12 +1693,16 @@ async function openScanner(forArticle = false) {
   document.getElementById('scanInput').focus();
 }
 
-async function startCamera(request) {
+// reason: why the scanner of the app is not used, shown with the camera
+async function startCamera(request, reason = '') {
   const hint = document.getElementById('scanHint');
   if (!('BarcodeDetector' in window) || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
-    hint.textContent = 'Dieser Browser kann keine Barcodes lesen: tippe die Ziffern unter dem Strichcode ein. In der Home-Assistant-App öffnet sich der Scanner.';
+    hint.textContent = reason
+      ? `${reason} Bis dahin: tippe die Ziffern unter dem Strichcode ein.`
+      : 'Dieser Browser kann keine Barcodes lesen: tippe die Ziffern unter dem Strichcode ein. In der Home-Assistant-App öffnet sich der Scanner.';
     return;
   }
+  hint.textContent = reason;
   try {
     const supported = await window.BarcodeDetector.getSupportedFormats();
     const formats = ['ean_13', 'ean_8', 'upc_a', 'upc_e'].filter(format => supported.includes(format));
@@ -1719,7 +1731,7 @@ async function startCamera(request) {
     detect();
   } catch (err) {
     stopCamera();
-    hint.textContent = `Die Kamera ist nicht verfügbar (${err.message}): tippe die Ziffern unter dem Strichcode ein.`;
+    hint.textContent = `${reason ? reason + ' ' : ''}Die Kamera ist nicht verfügbar (${err.message}): tippe die Ziffern unter dem Strichcode ein.`;
   }
 }
 
@@ -2554,7 +2566,6 @@ document.getElementById('busyDays').addEventListener('click', event => {
 if (window.parent === window) {
   showError('Diese Seite funktioniert nur als Home-Assistant-Panel (Seitenleiste → Lidl Plus).');
 } else {
-  if (outdatedPanel()) showReloadHint();
   requestData();
   setInterval(requestData, REFRESH_INTERVAL_MS);
 }

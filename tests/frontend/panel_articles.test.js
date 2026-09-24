@@ -99,6 +99,8 @@ const product = {
 
 (async () => {
   const { window, document, parentMessages, errors, send, last, answer } = openPage();
+  // The panel element in the Home Assistant app with its barcode scanner
+  send({ type: "lidl-plus:panel", version: VERSION, app: true, scanner: true });
   send({ type: "lidl-plus:data", data });
   assert.deepStrictEqual(errors, []);
 
@@ -316,7 +318,7 @@ const product = {
   assert.strictEqual(document.getElementById("articleFormStatus").textContent, "⚠️ Der Barcode 4056489123453 gehört schon zu Duschgel");
   window.closeProductModal();
 
-  // ── Scanning in the browser: no scanner of the app, no BarcodeDetector ──────
+  // ── The scanner of the app is not available after all, no BarcodeDetector ────
   const scanModal = document.getElementById("scanModal");
   document.querySelector("button[onclick='openScanner()']").click();
   assert.ok(scanModal.classList.contains("open"));

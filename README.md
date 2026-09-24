@@ -386,6 +386,10 @@ cd tests/frontend && npm ci && npm test # the sidebar panel (panel.js and index.
 
 ## Changelog
 
+### 1.3.2 — Home Assistant integration (2026-09-24)
+- The scanner of the Home Assistant app did not open after an update to 1.3.1 without a restart of Home Assistant: the page compared its version with the address of the panel element, which keeps the version of the start of Home Assistant. The panel element tells the page its version and whether the app offers its barcode scanner now
+- The scan dialog tells why the scanner of the app is not used (an app without scanner, or a panel element of an older version)
+
 ### 1.3.1 — Home Assistant integration (2026-09-24)
 - After an update Home Assistant may still have the panel element of the older version loaded, which rejected the new commands of the article database with "Unknown command". The panel element passes on every command of the integration now, and the page asks to reload Home Assistant if it belongs to an older panel element
 

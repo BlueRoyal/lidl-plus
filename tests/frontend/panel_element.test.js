@@ -6,6 +6,7 @@ const assert = require("assert");
 const { JSDOM } = require("jsdom");
 
 const MODULE_URL = "http://ha.local:8123/lidl_plus_frontend/panel.js?v=1.2.0";
+const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "custom_components", "lidl_plus", "manifest.json"), "utf8")).version;
 // jsdom cannot run ES modules, import.meta.url is the only module feature used
 const code = fs.readFileSync(path.join(__dirname, "..", "..", "custom_components", "lidl_plus", "frontend", "panel.js"), "utf8").replaceAll("import.meta.url", JSON.stringify(MODULE_URL));
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -63,6 +64,9 @@ window.eval(code);
   assert.strictEqual(JSON.stringify(calls), JSON.stringify([{ type: "lidl_plus/panel_data", entry_id: "e2", known_sync: "2026-05-15T12:00:00+00:00" }]));
   assert.strictEqual(posted[posted.length - 1].msg.type, "lidl-plus:data");
   assert.strictEqual(posted[posted.length - 1].msg.data.entry_id, "e2");
+  // Before the data: the version of the file (its address keeps the one of the start of Home Assistant), no app
+  assert.ok(code.includes(`const PANEL_VERSION = "${VERSION}";`), "PANEL_VERSION of panel.js is the version of manifest.json");
+  assert.strictEqual(JSON.stringify(posted[posted.length - 2].msg), JSON.stringify({ type: "lidl-plus:panel", version: VERSION, app: false, scanner: false }));
   assert.ok(posted.every((p) => p.origin === "http://ha.local:8123"));
 
   // Frequent hass updates neither repeat the request nor the menu state
@@ -134,6 +138,10 @@ window.eval(code);
   const frontendBus = (msg) => handled.push(msg);
   window.externalBus = frontendBus;
   panel.hass = { ...hass, auth: { external: { config: { hasBarCodeScanner: 1 }, fireMessage: (msg) => fired.push(msg) } } };
+  // The page learns that the app offers its scanner
+  fromPage({ type: "lidl-plus:request" });
+  await tick();
+  same(posted.filter((p) => p.msg.type === "lidl-plus:panel").at(-1).msg, { type: "lidl-plus:panel", version: VERSION, app: true, scanner: true });
   fromPage({ type: "lidl-plus:scan", id: 31 });
   await tick();
   assert.strictEqual(fired[0].type, "bar_code/scan");

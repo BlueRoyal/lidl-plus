@@ -31,6 +31,9 @@ const EXPORT_PATH = "/api/lidl_plus/export";
 // Messages of the Home Assistant app that end a scan of its barcode scanner
 const SCAN_RESULT = "bar_code/scan_result";
 const SCAN_ABORTED = "bar_code/aborted";
+// Version of this file, told to the page. The address of this file (?v=) keeps the version of the start of Home
+// Assistant until it is restarted, while the file itself may be a newer one already
+const PANEL_VERSION = "1.3.2";
 
 class LidlPlusPanel extends HTMLElement {
   constructor() {
@@ -150,6 +153,13 @@ class LidlPlusPanel extends HTMLElement {
     if (!this._hass || !this._request) return;
     const request = this._request;
     this._request = null;
+    // What the page can use: this version, and the barcode scanner of the Home Assistant app
+    this._post({
+      type: "lidl-plus:panel",
+      version: PANEL_VERSION,
+      app: Boolean(this._external()),
+      scanner: this._scannerAvailable(),
+    });
     try {
       this._post({ type: "lidl-plus:data", data: await this._hass.callWS(request) });
     } catch (err) {
@@ -187,10 +197,8 @@ class LidlPlusPanel extends HTMLElement {
   // listeners for the results to itself, so the messages of the app are read before the frontend handles them.
   // Resolves with {code, format}, {cancelled, reason} or {unsupported} (browser: the page uses the camera).
   _scan() {
-    const external = this._hass && this._hass.auth && this._hass.auth.external;
-    if (!external || !external.config || !external.config.hasBarCodeScanner || typeof window.externalBus !== "function") {
-      return Promise.resolve({ unsupported: true });
-    }
+    const external = this._external();
+    if (!this._scannerAvailable()) return Promise.resolve({ unsupported: true });
     this._stopScan({ cancelled: true, reason: "restarted" });
     return new Promise((resolve) => {
       const original = window.externalBus;
@@ -221,6 +229,16 @@ class LidlPlusPanel extends HTMLElement {
         },
       });
     });
+  }
+
+  // The messaging with the Home Assistant app, only inside the app
+  _external() {
+    return (this._hass && this._hass.auth && this._hass.auth.external) || null;
+  }
+
+  _scannerAvailable() {
+    const external = this._external();
+    return Boolean(external && external.config && external.config.hasBarCodeScanner && typeof window.externalBus === "function");
   }
 
   _stopScan(result) {

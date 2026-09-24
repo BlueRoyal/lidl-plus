@@ -165,32 +165,54 @@ const data = {
   window.close(); // stops the refresh interval of the page
 }
 
-// ── After an update: the version of the page is the one of the integration ───
+// ── After an update: the panel element tells its version, older ones tell nothing ──
 assert.ok(html.includes(`const PAGE_VERSION = '${VERSION}';`), "PAGE_VERSION of index.html is the version of manifest.json");
 {
-  // Home Assistant still has the panel element of an older version loaded
-  const { window, document, parentMessages } = openPage({ version: "1.2.0" });
+  // Home Assistant still has the panel element of an older version loaded, it sends the data only
+  const { window, document, parentMessages, send } = openPage();
   const banner = document.getElementById("reloadBanner");
+  assert.ok(banner.classList.contains("hidden"), "no hint before the data");
+  send({ type: "lidl-plus:data", data });
   assert.ok(!banner.classList.contains("hidden"));
   assert.ok(banner.textContent.includes("Strg+F5"));
-  // The old element knows no scanner: the page does not wait for it
-  const before = parentMessages.length;
+  // The elements of 1.3.0 and 1.3.1 open the scanner of the app, older ones never answer
   window.openScanner();
-  assert.strictEqual(parentMessages.length, before);
-  assert.ok(document.getElementById("scanHint").textContent.includes("einmal neu geladen"));
+  assert.strictEqual(parentMessages.at(-1).msg.type, "lidl-plus:scan");
+  assert.ok(document.getElementById("scanHint").textContent.includes("ganz und öffne sie neu"));
   window.close();
 }
 {
-  // The same version: no hint, until a command is unknown
-  const { window, document, parentMessages, send } = openPage();
+  // An element of another version
+  const { window, document, send } = openPage();
+  send({ type: "lidl-plus:panel", version: "1.9.0", app: true, scanner: true });
+  send({ type: "lidl-plus:data", data });
+  assert.ok(!document.getElementById("reloadBanner").classList.contains("hidden"));
+  window.close();
+}
+{
+  // The element of this version, its address may keep an older version: no hint, until a command is unknown
+  const { window, document, parentMessages, send } = openPage({ version: "1.3.0" });
+  send({ type: "lidl-plus:panel", version: VERSION, app: true, scanner: false });
+  send({ type: "lidl-plus:data", data });
   const banner = document.getElementById("reloadBanner");
   assert.ok(banner.classList.contains("hidden"));
-  send({ type: "lidl-plus:data", data });
+  // An app without scanner: the page tells why and does not ask the element
+  const before = parentMessages.length;
+  window.openScanner();
+  assert.strictEqual(parentMessages.length, before);
+  assert.ok(document.getElementById("scanHint").textContent.startsWith("Deine Home-Assistant-App bietet keinen Barcode-Scanner an"));
+  window.closeScanModal();
+  // A browser
+  send({ type: "lidl-plus:panel", version: VERSION, app: false, scanner: false });
+  window.openScanner();
+  assert.strictEqual(parentMessages.length, before);
+  assert.ok(document.getElementById("scanHint").textContent.startsWith("Dieser Browser kann keine Barcodes lesen"));
+  window.closeScanModal();
   window.searchAll();
   document.getElementById("globalSearch").value = "kaffee";
   window.searchAll();
   const call = parentMessages[parentMessages.length - 1].msg;
-  send({ type: "lidl-plus:result", id: call.id, error: "Unknown command" });
+  send({ type: "lidl-plus:result", id: call.id, error: "Unknown command." });
   setTimeout(() => {
     assert.ok(!banner.classList.contains("hidden"), "an unknown command shows the hint");
     window.close();
