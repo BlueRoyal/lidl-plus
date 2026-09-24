@@ -1,5 +1,5 @@
 """
-Exeptions
+Exceptions
 """
 
 
@@ -9,6 +9,10 @@ class WebBrowserException(Exception):
 
 class LoginError(Exception):
     """Login failed"""
+
+
+class AuthenticationError(LoginError):
+    """Refresh token or authorization code rejected by the Lidl auth server"""
 
 
 class LegalTermsException(Exception):

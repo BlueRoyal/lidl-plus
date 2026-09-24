@@ -2,159 +2,150 @@
 
 from __future__ import annotations
 
-import json
+import glob
 import logging
 import os
+import shutil
+import threading
 
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.storage import STORAGE_DIR
+from homeassistant.helpers.typing import ConfigType
+from homeassistant.util import dt as dt_util
+from homeassistant.util import slugify
 
-from .const import (
-    CONF_COUNTRY,
-    CONF_LANGUAGE,
-    CONF_REFRESH_TOKEN,
-    DOMAIN,
-    KEY_AVERAGE_BASKET,
-    KEY_CATEGORY_FOOD_SPENDING,
-    KEY_CATEGORY_NONFOOD_SPENDING,
-    KEY_CURRENT_MONTH_SPENDING,
-    KEY_SPENDING_BY_MONTH,
-    KEY_SPENDING_BY_STORE,
-    KEY_TOTAL_TICKETS,
-    SERVICE_ACTIVATE_ALL_COUPONS,
-    SERVICE_SYNC,
-)
-from .coordinator import LidlPlusCoordinator
+from ._lidlplus.api import LidlPlusApi
+from .article_api import async_setup_article_api
+from .const import CONF_COUNTRY, CONF_LANGUAGE, CONF_REFRESH_TOKEN, DOMAIN, KEY_LOYALTY_ID
+from .coordinator import LidlPlusConfigEntry, LidlPlusCoordinator
+from .panel import async_register_panel, async_setup_panel_api, async_unregister_panel
+from .rest_api import async_setup_rest_api
+from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor"]
-_CACHE_FILENAME = "lidl_plus_cache.json"
-_WWW_DIR = "www/lidl_plus"
-_DATA_FILE = "www/lidl_plus/data.json"
+
+PLATFORMS = [Platform.SENSOR]
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+# Files of versions before 1.2.0: a cache shared by all entries and panel data served without authentication
+_LEGACY_CACHE_FILE = "lidl_plus_cache.json"
+_LEGACY_PANEL_DATA_FILE = "www/lidl_plus/data.json"
+# Entries are set up in parallel, the migration of the shared files must run one after the other
+_STORAGE_LOCK = threading.Lock()
 
 
-async def _write_panel_data(hass: HomeAssistant, coordinator: LidlPlusCoordinator) -> None:
-    """Write full receipts + products data to www/lidl_plus/data.json for the panel."""
-    if not coordinator.data:
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Set up the services, the APIs and the panel."""
+    async_setup_services(hass)
+    async_setup_panel_api(hass)
+    async_setup_article_api(hass)
+    async_setup_rest_api(hass)
+    # Registered independently of the entries, so the panel stays while an entry is reloaded or cannot be set up
+    await async_register_panel(hass)
+    return True
+
+
+def _cache_path(hass: HomeAssistant, entry: LidlPlusConfigEntry) -> str:
+    return hass.config.path(STORAGE_DIR, f"{DOMAIN}_cache_{entry.entry_id}.json")
+
+
+def _removed_cache_path(hass: HomeAssistant, unique_id: str) -> str:
+    """Cache of a removed entry, a new entry of the same account continues with it."""
+    return hass.config.path(STORAGE_DIR, f"{DOMAIN}_removed_{slugify(unique_id)}.json")
+
+
+def _move_without_overwriting(source: str, target: str) -> str:
+    """Move a file, an existing target gets a timestamp in its name so nothing is replaced."""
+    if os.path.exists(target):
+        base, extension = os.path.splitext(target)
+        target = f"{base}_{dt_util.utcnow():%Y%m%d%H%M%S}{extension}"
+    os.replace(source, target)
+    return target
+
+
+def _prepare_storage(hass: HomeAssistant, entry: LidlPlusConfigEntry) -> str:
+    """Return the receipt cache of the entry. Files of older versions are copied or moved, never deleted."""
+    with _STORAGE_LOCK:
+        return _prepare_storage_locked(hass, entry)
+
+
+def _prepare_storage_locked(hass: HomeAssistant, entry: LidlPlusConfigEntry) -> str:
+    cache_path = _cache_path(hass, entry)
+    storage_dir = os.path.dirname(cache_path)
+    os.makedirs(storage_dir, exist_ok=True)
+    if not os.path.exists(cache_path):
+        removed_cache = _removed_cache_path(hass, entry.unique_id) if entry.unique_id else ""
+        legacy_cache = hass.config.path(_LEGACY_CACHE_FILE)
+        if removed_cache and os.path.exists(removed_cache):
+            os.replace(removed_cache, cache_path)
+            _LOGGER.info("Continuing with the receipt cache of the removed entry of this account")
+        elif os.path.exists(legacy_cache) and not glob.glob(
+            os.path.join(glob.escape(storage_dir), f"{DOMAIN}_cache_*.json")
+        ):
+            # Up to version 1.1.0 all entries shared one cache. The first entry gets a copy, the original
+            # stays as backup, so going back to an older version keeps working as well.
+            temp_path = f"{cache_path}.tmp"
+            shutil.copyfile(legacy_cache, temp_path)
+            os.replace(temp_path, cache_path)
+            _LOGGER.info("Copied the receipt cache %s to %s, the old file stays as backup", legacy_cache, cache_path)
+    public_data = hass.config.path(_LEGACY_PANEL_DATA_FILE)
+    if os.path.exists(public_data):
+        # Everything in www/ can be downloaded without login, the panel uses the websocket API now
+        backup = _move_without_overwriting(
+            public_data, hass.config.path(STORAGE_DIR, f"{DOMAIN}_panel_data_backup.json")
+        )
+        _LOGGER.info("Moved %s out of the public www folder to %s", public_data, backup)
+    return cache_path
+
+
+@callback
+def _async_migrate_unique_id(hass: HomeAssistant, entry: LidlPlusConfigEntry) -> None:
+    """Identify entries of older versions by their loyalty ID instead of country and language."""
+    loyalty_id = entry.runtime_data.data.get(KEY_LOYALTY_ID)
+    if not loyalty_id or entry.unique_id == loyalty_id:
         return
-
-    data = coordinator.data
-    output = {
-        "receipts": [
-            {
-                "id": r["id"],
-                "date": r["date"],
-                "store": r["store"],
-                "total": r["total"],
-                "items": r.get("items", []),
-            }
-            for r in data.get("receipts", [])
-        ],
-        "products": data.get("products", []),
-        "last_sync": data.get("last_sync", ""),
-        "spending_by_month": data.get(KEY_SPENDING_BY_MONTH, {}),
-        "spending_by_store": data.get(KEY_SPENDING_BY_STORE, {}),
-        "food_total": data.get(KEY_CATEGORY_FOOD_SPENDING, 0),
-        "nonfood_total": data.get(KEY_CATEGORY_NONFOOD_SPENDING, 0),
-        "total_tickets": data.get(KEY_TOTAL_TICKETS, 0),
-        "avg_basket": data.get(KEY_AVERAGE_BASKET, 0),
-        "current_month": data.get(KEY_CURRENT_MONTH_SPENDING, 0),
-    }
-
-    www_path = hass.config.path(_WWW_DIR)
-    data_path = hass.config.path(_DATA_FILE)
-
-    def _write():
-        os.makedirs(www_path, exist_ok=True)
-        with open(data_path, "w", encoding="utf-8") as f:
-            json.dump(output, f, ensure_ascii=False, indent=2)
-
-    await hass.async_add_executor_job(_write)
+    if hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, loyalty_id):
+        return  # the same account is configured twice, keep both entries as they are
+    hass.config_entries.async_update_entry(entry, unique_id=loyalty_id)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: LidlPlusConfigEntry) -> bool:
     """Set up Lidl Plus from a config entry."""
-    from ._lidlplus.api import LidlPlusApi
-
-    cache_path = hass.config.path(_CACHE_FILENAME)
+    cache_path = await hass.async_add_executor_job(_prepare_storage, hass, entry)
     api = LidlPlusApi(
         language=entry.data[CONF_LANGUAGE],
         country=entry.data[CONF_COUNTRY],
         refresh_token=entry.data[CONF_REFRESH_TOKEN],
         cache_file=cache_path,
     )
-
-    coordinator = LidlPlusCoordinator(hass, api)
+    coordinator = LidlPlusCoordinator(hass, entry, api)
     await coordinator.async_config_entry_first_refresh()
+    entry.runtime_data = coordinator
+    _async_migrate_unique_id(hass, entry)
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    # Write initial panel data
-    await _write_panel_data(hass, coordinator)
-
-    # Update panel data on every coordinator refresh
-    @callback
-    def _on_coordinator_update():
-        hass.async_create_task(_write_panel_data(hass, coordinator))
-
-    coordinator.async_add_listener(_on_coordinator_update)
-
-    # Panel is registered via panel_custom in configuration.yaml
-
-    # ── Services ──────────────────────────────────────────────────────────────
-
-    async def handle_activate_all_coupons(call: ServiceCall) -> None:
-        """Activate every currently available coupon (both API v1 and v2)."""
-        try:
-            coupons_raw = await hass.async_add_executor_job(api.coupons)
-            coupon_list = (
-                coupons_raw if isinstance(coupons_raw, list)
-                else [c for section in coupons_raw.get("sections", []) for c in section.get("coupons", [])]
-            )
-            for coupon in coupon_list:
-                if coupon.get("activated") or coupon.get("isActivated"):
-                    continue
-                coupon_id = coupon.get("id") or coupon.get("couponId")
-                if coupon_id:
-                    await hass.async_add_executor_job(api.activate_coupon, coupon_id)
-
-            promos_raw = await hass.async_add_executor_job(api.coupon_promotions_v1)
-            promo_list = (
-                promos_raw if isinstance(promos_raw, list)
-                else [p for section in promos_raw.get("sections", []) for p in section.get("promotions", [])]
-            )
-            for promo in promo_list:
-                if promo.get("isActivated"):
-                    continue
-                promo_id = promo.get("promotionId") or promo.get("id")
-                if promo_id:
-                    await hass.async_add_executor_job(api.activate_coupon_promotion_v1, promo_id)
-
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.error("Failed to activate coupons: %s", exc)
-
-        await coordinator.async_request_refresh()
-
-    async def handle_sync(call: ServiceCall) -> None:
-        """Force an immediate sync of new receipts."""
-        await coordinator.async_request_refresh()
-
-    if not hass.services.has_service(DOMAIN, SERVICE_ACTIVATE_ALL_COUPONS):
-        hass.services.async_register(DOMAIN, SERVICE_ACTIVATE_ALL_COUPONS, handle_activate_all_coupons)
-    if not hass.services.has_service(DOMAIN, SERVICE_SYNC):
-        hass.services.async_register(DOMAIN, SERVICE_SYNC, handle_sync)
-
+    # The panel was removed if all entries were deleted before this one was added
+    await async_register_panel(hass)
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: LidlPlusConfigEntry) -> bool:
     """Unload a config entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
-        if not hass.data[DOMAIN]:
-            hass.services.async_remove(DOMAIN, SERVICE_ACTIVATE_ALL_COUPONS)
-            hass.services.async_remove(DOMAIN, SERVICE_SYNC)
-            pass  # panel removed automatically when panel_custom config is gone
-    return unload_ok
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: LidlPlusConfigEntry) -> None:
+    """Keep the receipt cache of the removed entry, remove the panel with the last entry."""
+
+    def _keep_cache() -> None:
+        cache_path = _cache_path(hass, entry)
+        if os.path.exists(cache_path):
+            # Lidl may not return old receipts anymore, so the cache is kept for a new entry of the account
+            target = _move_without_overwriting(cache_path, _removed_cache_path(hass, entry.unique_id or entry.entry_id))
+            _LOGGER.info("Kept the receipt cache of the removed entry as %s", target)
+
+    await hass.async_add_executor_job(_keep_cache)
+    if not hass.config_entries.async_entries(DOMAIN, include_ignore=False):
+        async_unregister_panel(hass)

@@ -1,0 +1,2574 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lidl Plus</title>
+<!-- Shipped with the integration (see vendor/THIRD_PARTY_LICENSES.md): works offline, no CDN code in the HA origin -->
+<script src="vendor/tailwindcss-play-3.4.17.js"></script>
+<script src="vendor/chart-4.4.0.umd.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .tab { display: none !important; }
+  .tab.active { display: block !important; }
+  .tab-btn { padding: 13px 18px; border: none; background: none; cursor: pointer; font-size: 14px; font-weight: 500; color: #6b7280; border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.2s; white-space: nowrap; }
+  .tab-btn:hover { color: #003882; }
+  .tab-btn.active { color: #003882; border-bottom-color: #003882; }
+  .receipt-items { display: none; }
+  .receipt-items.open { display: block; }
+  .chevron { transition: transform 0.2s; display: inline-block; }
+  .chevron.open { transform: rotate(90deg); }
+  .modal-overlay { display: none; }
+  .modal-overlay.open { display: flex; }
+  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  #accountSelect option { color: #111827; }
+  .btn { display: inline-flex; align-items: center; gap: 4px; padding: 5px 11px; border-radius: 10px; font-size: 12px; font-weight: 500; background: #f3f4f6; color: #1f2937; cursor: pointer; text-decoration: none; }
+  .btn:hover { background: #e5e7eb; }
+  .btn-primary { background: #003882; color: #fff; }
+  .btn-primary:hover { background: #002a63; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 9999px; padding: 2px 8px; }
+  .badge-current { background: #dcfce7; color: #15803d; }
+  .badge-upcoming { background: #fef3c7; color: #b45309; }
+  .section-title { font-size: 11px; font-weight: 600; color: #9ca3af; text-transform: uppercase; letter-spacing: .05em; margin: 4px 0 8px; }
+  .menu-item { display: block; width: 100%; text-align: left; padding: 9px 14px; font-size: 13px; background: none; border: none; cursor: pointer; }
+  .menu-item:hover { background: #f3f4f6; }
+</style>
+</head>
+<body class="bg-gray-100 text-gray-900 text-sm">
+
+<!-- ── HEADER ─────────────────────────────────────────────────────────────── -->
+<header class="bg-[#003882] text-white px-5 py-3.5 flex items-center gap-3 sticky top-0 z-50 shadow-xl">
+  <!-- Opens the HA sidebar on narrow screens, where the panel has no other way to reach it -->
+  <button id="menuBtn" class="hidden -ml-2 p-1 rounded-lg hover:bg-white/10" onclick="toggleSidebar()" aria-label="Menü">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/></svg>
+  </button>
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+    <path d="M7 18c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm10 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM5.17 5H2V3H0v2h2l3.6 7.59-1.35 2.44C4.09 15.31 4 15.64 4 16c0 1.1.9 2 2 2h14v-2H6.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63H19c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0023.46 5H5.17z"/>
+  </svg>
+  <h1 class="text-lg font-semibold tracking-tight">Lidl Plus</h1>
+  <!-- Only shown with more than one Lidl Plus account -->
+  <select id="accountSelect" class="hidden bg-white/10 text-white text-xs rounded-lg px-2 py-1 outline-none max-w-[40%]"
+          onchange="selectAccount(this.value)" aria-label="Konto"></select>
+  <span class="ml-auto text-xs opacity-70 shrink-0" id="syncInfo">Lade…</span>
+  <div class="relative shrink-0">
+    <button id="exportBtn" class="p-1.5 -mr-1.5 rounded-lg hover:bg-white/10" onclick="toggleExportMenu(event)"
+            aria-label="Daten exportieren" title="Daten exportieren">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/></svg>
+    </button>
+    <div id="exportMenu" class="hidden absolute right-0 top-10 bg-white text-gray-800 rounded-xl shadow-2xl py-1.5 w-72 z-50">
+      <div class="px-3.5 pt-1 pb-1.5 text-[11px] text-gray-400 uppercase tracking-wide">Exportieren</div>
+      <button class="menu-item" data-dataset="all">📦 Alles (ZIP: alle Tabellen + Rohdaten)</button>
+      <button class="menu-item" data-dataset="receipts" data-format="csv">🧾 Kassenbons (CSV)</button>
+      <button class="menu-item" data-dataset="items" data-format="csv">🛒 Artikel aller Kassenbons (CSV)</button>
+      <button class="menu-item" data-dataset="products" data-format="csv">📦 Produkte mit Statistik (CSV)</button>
+      <button class="menu-item" data-dataset="offers" data-format="csv">🏷️ Angebote (CSV)</button>
+      <button class="menu-item" data-dataset="leaflets" data-format="csv">📰 Prospekt-Produkte (CSV)</button>
+    </div>
+  </div>
+</header>
+
+<!-- ── NAVIGATION ────────────────────────────────────────────────────────── -->
+<nav class="bg-white border-b-2 border-gray-200 px-4 flex overflow-x-auto">
+  <button class="tab-btn active" onclick="showTab('overview',this)">📊 Übersicht</button>
+  <button class="tab-btn" onclick="showTab('receipts',this)">🧾 Kassenbons</button>
+  <button class="tab-btn" onclick="showTab('products',this)">📦 Artikel</button>
+  <button class="tab-btn" onclick="showTab('offers',this)">🏷️ Angebote</button>
+  <button class="tab-btn" onclick="showTab('leaflets',this)">📰 Prospekte</button>
+  <button class="tab-btn" onclick="showTab('busy',this)">🕒 Stoßzeiten</button>
+</nav>
+
+<div class="max-w-7xl mx-auto px-4 py-5">
+
+<!-- Fehler beim Laden bzw. bei der letzten Synchronisierung -->
+<div id="errorBanner" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-2xl px-4 py-3 mb-4"></div>
+<div id="syncWarning" class="hidden bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl px-4 py-3 mb-4"></div>
+<!-- After an update Home Assistant may still have the panel element of the older version loaded -->
+<div id="reloadBanner" class="hidden bg-blue-50 border border-blue-200 text-[#003882] rounded-2xl px-4 py-3 mb-4">
+  🔄 Die Lidl-Plus-Integration wurde aktualisiert, Home Assistant hat aber noch die alte Version des Panels geladen.
+  Bitte lade Home Assistant einmal neu: im Browser mit Strg+F5, in der Handy-App die App ganz schließen und neu öffnen.
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: ÜBERSICHT
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-overview" class="tab active">
+
+  <!-- KPI-Karten -->
+  <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-5" id="overviewCards">
+    <div class="bg-white rounded-2xl p-4 shadow-sm text-center animate-pulse">
+      <div class="h-7 bg-gray-100 rounded mb-2 mx-4"></div>
+      <div class="h-3 bg-gray-100 rounded mx-6"></div>
+    </div>
+  </div>
+
+  <!-- Monatliche Ausgaben -->
+  <div class="bg-white rounded-2xl p-5 shadow-sm mb-4">
+    <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">📅 Ausgaben pro Monat</h2>
+    <div style="height:260px;position:relative"><canvas id="chartMonthly"></canvas></div>
+  </div>
+
+  <!-- Kategorie + Filialen -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="bg-white rounded-2xl p-5 shadow-sm">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">🥦 Ausgaben nach Kategorie</h2>
+      <div style="height:240px;position:relative"><canvas id="chartCategory"></canvas></div>
+    </div>
+    <div class="bg-white rounded-2xl p-5 shadow-sm">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">🏪 Top Filialen</h2>
+      <div style="height:240px;position:relative"><canvas id="chartStores"></canvas></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: KASSENBONS
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-receipts" class="tab">
+
+  <!-- Filter-Panel -->
+  <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <input type="text" id="receiptSearch" placeholder="🔍 Filiale oder Artikel…"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] transition-colors"
+             oninput="filterReceipts()">
+      <select id="receiptStore"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterReceipts()">
+        <option value="">Alle Filialen</option>
+      </select>
+      <select id="receiptSort"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterReceipts()">
+        <option value="date-desc">Neueste zuerst</option>
+        <option value="date-asc">Älteste zuerst</option>
+        <option value="total-desc">Höchster Betrag</option>
+        <option value="total-asc">Niedrigster Betrag</option>
+      </select>
+      <div class="flex gap-2">
+        <input type="number" id="receiptMin" placeholder="Min €" step="0.01" min="0"
+               class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] w-full"
+               oninput="filterReceipts()">
+        <input type="number" id="receiptMax" placeholder="Max €" step="0.01" min="0"
+               class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] w-full"
+               oninput="filterReceipts()">
+      </div>
+      <input type="date" id="receiptFrom"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]"
+             onchange="filterReceipts()">
+      <input type="date" id="receiptTo"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]"
+             onchange="filterReceipts()">
+    </div>
+    <p class="mt-2.5 text-xs text-gray-400" id="receiptCount"></p>
+  </div>
+
+  <div id="receiptList" class="text-center py-16 text-gray-400">Lade Kassenbons…</div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: ARTIKEL
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-products" class="tab">
+
+  <!-- KPI-Karten -->
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4" id="productStats"></div>
+
+  <!-- Artikeldatenbank: alle gekauften, angebotenen und aus Prospekten bekannten Artikel -->
+  <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+    <div class="flex flex-wrap gap-2 mb-3">
+      <button class="btn btn-primary !text-sm !px-4 !py-2" onclick="openScanner()">📷 Barcode scannen</button>
+      <button class="btn !text-sm !px-4 !py-2" onclick="newArticle()">＋ Neuer Artikel</button>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      <input type="search" id="productSearch" placeholder="🔍 Name, Marke, Barcode, Zutat…"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]"
+             oninput="scheduleArticleSearch()">
+      <select id="productKind"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="loadArticles()">
+        <option value="">Alle Artikel</option>
+        <option value="bought">Gekaufte Artikel</option>
+        <option value="offers">Aus Angeboten</option>
+        <option value="leaflets">Aus Prospekten</option>
+        <option value="own">Selbst angelegt</option>
+        <option value="details">Mit eigenen Angaben</option>
+        <option value="nutrition">Mit Nährwerten</option>
+        <option value="no_nutrition">Ohne Nährwerte</option>
+        <option value="ingredients">Mit Zutaten / Inhaltsstoffen</option>
+        <option value="photos">Mit Fotos</option>
+        <option value="barcode">Mit Barcode</option>
+      </select>
+      <select id="productSort"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="loadArticles()">
+        <option value="count-desc">Häufig gekauft</option>
+        <option value="spent-desc">Meiste Ausgaben</option>
+        <option value="savings-desc">Meiste Ersparnis</option>
+        <option value="name-asc">Name A–Z</option>
+        <option value="bought-desc">Zuletzt gekauft</option>
+        <option value="last-desc">Zuletzt gesehen</option>
+        <option value="updated-desc">Zuletzt bearbeitet</option>
+        <option value="price-desc">Höchster Preis</option>
+        <option value="price-asc">Niedrigster Preis</option>
+      </select>
+      <select id="productTrend"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="loadArticles()">
+        <option value="">Alle Preistrends</option>
+        <option value="up">↑ Preis gestiegen</option>
+        <option value="down">↓ Preis gesunken</option>
+        <option value="stable">→ Preis stabil</option>
+      </select>
+      <select id="productPeriod"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="loadArticles()">
+        <option value="">Alle Zeiträume</option>
+        <option value="30">Gekauft in 30 Tagen</option>
+        <option value="90">Gekauft in 90 Tagen</option>
+        <option value="180">Gekauft in 6 Monaten</option>
+        <option value="365">Gekauft im letzten Jahr</option>
+      </select>
+    </div>
+    <p class="mt-2.5 text-xs text-gray-400" id="productCount"></p>
+  </div>
+
+  <div id="productGrid" class="text-center py-16 text-gray-400">Lade Artikel…</div>
+  <div class="text-center mt-4">
+    <button id="productMore" class="btn hidden !text-sm !px-4 !py-2" onclick="loadArticles(true)">Weitere Artikel laden</button>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: ANGEBOTE
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-offers" class="tab">
+
+  <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+    <p class="text-xs text-gray-500 mb-3" id="offerStores"></p>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <input type="text" id="offerSearch" placeholder="🔍 Angebot suchen…"
+             class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]"
+             oninput="filterOffers()">
+      <select id="offerStatus"
+              class="border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white"
+              onchange="filterOffers()">
+        <option value="">Aktuelle und kommende</option>
+        <option value="current">Nur aktuelle</option>
+        <option value="upcoming">Nur kommende</option>
+      </select>
+      <label class="flex items-center gap-2 text-gray-600 cursor-pointer select-none">
+        <input type="checkbox" id="offerBought" onchange="filterOffers()" class="w-4 h-4 accent-[#003882]">
+        Nur Artikel, die ich schon gekauft habe
+      </label>
+    </div>
+    <p class="mt-2.5 text-xs text-gray-400" id="offerCount"></p>
+  </div>
+
+  <div id="offerGrid" class="text-center py-16 text-gray-400">Lade Angebote…</div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: PROSPEKTE
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-leaflets" class="tab">
+
+  <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+    <form id="searchForm" class="flex gap-2" onsubmit="searchAll(event)">
+      <input type="search" id="globalSearch" placeholder="🔍 Prospekte, Angebote und Einkäufe durchsuchen, z. B. Kaffee"
+             class="flex-1 min-w-0 border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]">
+      <button type="submit" class="btn btn-primary !text-sm !px-4">Suchen</button>
+    </form>
+    <div id="searchResults" class="hidden mt-4"></div>
+    <p class="mt-3 text-xs text-gray-500" id="leafletRegion"></p>
+  </div>
+
+  <div id="leafletGrid" class="text-center py-16 text-gray-400">Lade Prospekte…</div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TAB: STOSSZEITEN
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="tab-busy" class="tab">
+
+  <div class="bg-white rounded-2xl p-5 shadow-sm mb-4">
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+      <div class="min-w-0">
+        <h2 class="text-base font-semibold text-gray-800" id="busyStore">Stoßzeiten</h2>
+        <p class="text-xs text-gray-500 mt-0.5" id="busyOpening"></p>
+      </div>
+      <span id="busyNow" class="badge hidden"></span>
+    </div>
+    <div class="flex gap-1 mb-4 overflow-x-auto" id="busyDays"></div>
+    <div id="busyChartWrapper" style="height:240px;position:relative"><canvas id="chartBusy"></canvas></div>
+    <p class="text-center py-12 text-gray-400 hidden" id="busyClosed"></p>
+    <p class="text-sm text-gray-600 mt-4" id="busySummary"></p>
+    <p class="text-xs text-gray-400 mt-2" id="busySource"></p>
+  </div>
+
+  <!-- Einkaufsdauer aus dem Standort der Home-Assistant-App -->
+  <div class="bg-white rounded-2xl p-5 shadow-sm mb-4">
+    <h2 class="text-base font-semibold text-gray-800 mb-2">🛒 Einkaufsdauer</h2>
+    <div id="durationBody" class="text-sm text-gray-600"></div>
+  </div>
+
+</div>
+
+</div><!-- /max-w-7xl -->
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PRODUKT-DETAIL MODAL
+══════════════════════════════════════════════════════════════════════════ -->
+<!-- Above the leaflet dialog: articles are opened from a leaflet as well -->
+<div class="modal-overlay fixed inset-0 bg-black/50 z-[60] items-center justify-center p-4"
+     id="productModal" onclick="closeModal(event)">
+  <div class="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl">
+    <div class="flex items-start justify-between px-6 pt-5 pb-3 sticky top-0 bg-white rounded-t-2xl border-b border-gray-100 z-10">
+      <div class="min-w-0 pr-4">
+        <div class="text-[10px] uppercase tracking-wide text-gray-400 truncate" id="modalBrand"></div>
+        <h2 class="text-base font-bold text-[#003882] leading-tight" id="modalTitle"></h2>
+      </div>
+      <button class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0 mt-[-2px]"
+              onclick="closeProductModal()" aria-label="Schließen">×</button>
+    </div>
+    <div class="px-6 pb-6 pt-4">
+      <div id="articleHead"></div>
+      <div id="articlePurchases">
+        <div id="modalStats" class="grid grid-cols-3 gap-2 mb-3"></div>
+        <div id="modalSavings" class="text-xs text-green-700 mb-4"></div>
+        <div id="modalChartWrapper" style="position:relative;height:200px;margin-bottom:20px">
+          <canvas id="modalPriceChart"></canvas>
+        </div>
+        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Preishistorie</h3>
+        <div id="modalHistory" class="mb-2"></div>
+      </div>
+      <div id="articleDetails"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     PROSPEKT MODAL
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay fixed inset-0 bg-black/50 z-50 items-center justify-center p-4"
+     id="leafletModal" onclick="closeModal(event)">
+  <div class="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl">
+    <div class="flex items-start justify-between px-6 pt-5 pb-3 sticky top-0 bg-white rounded-t-2xl border-b border-gray-100 z-10">
+      <h2 class="text-base font-bold text-[#003882] pr-4 leading-tight" id="leafletTitle"></h2>
+      <button class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0 mt-[-2px]"
+              onclick="closeLeafletModal()" aria-label="Schließen">×</button>
+    </div>
+    <div class="px-6 pb-6 pt-4" id="leafletBody"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     ARTIKEL EINER PROSPEKTSEITE ZUORDNEN
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay fixed inset-0 bg-black/50 z-[70] items-center justify-center p-4"
+     id="pickModal" onclick="closeModal(event)">
+  <div class="bg-white rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
+    <div class="flex items-start justify-between px-6 pt-5 pb-3 sticky top-0 bg-white rounded-t-2xl border-b border-gray-100 z-10">
+      <h2 class="text-base font-bold text-[#003882] pr-4 leading-tight" id="pickTitle">Artikel zuordnen</h2>
+      <button class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0 mt-[-2px]"
+              onclick="closePickModal()" aria-label="Schließen">×</button>
+    </div>
+    <div class="px-6 pb-6 pt-4">
+      <p id="pickInfo" class="text-xs text-gray-500 mb-2"></p>
+      <form id="pickForm" class="flex gap-2" onsubmit="searchPick(event)">
+        <input type="search" id="pickSearch" autocomplete="off" placeholder="Artikel suchen, z. B. Skyr"
+               class="flex-1 min-w-0 border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]">
+        <button type="submit" class="btn btn-primary !text-sm !px-4">Suchen</button>
+      </form>
+      <div id="pickResults" class="mt-2"></div>
+      <p class="text-xs text-gray-500 mt-4 mb-1">Nicht dabei?</p>
+      <button type="button" class="btn !text-sm !py-2" onclick="createFromPick()">＋ Als neuen Artikel anlegen</button>
+      <p id="pickStatus" class="text-xs text-gray-500 mt-2"></p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     BARCODE SCANNEN
+══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay fixed inset-0 bg-black/50 z-[70] items-center justify-center p-4"
+     id="scanModal" onclick="closeModal(event)">
+  <div class="bg-white rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
+    <div class="flex items-start justify-between px-6 pt-5 pb-3 sticky top-0 bg-white rounded-t-2xl border-b border-gray-100 z-10">
+      <h2 class="text-base font-bold text-[#003882] pr-4 leading-tight">Barcode scannen</h2>
+      <button class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0 mt-[-2px]"
+              onclick="closeScanModal()" aria-label="Schließen">×</button>
+    </div>
+    <div class="px-6 pb-6 pt-4">
+      <div id="scanCamera" class="hidden mb-3">
+        <video id="scanVideo" playsinline muted class="w-full rounded-xl bg-black max-h-72 object-cover"></video>
+        <p class="text-xs text-gray-500 mt-1">Halte den Strichcode (EAN) der Verpackung vor die Kamera.</p>
+      </div>
+      <p id="scanHint" class="text-xs text-gray-500 mb-2"></p>
+      <form id="scanForm" class="flex gap-2" onsubmit="submitBarcode(event)">
+        <input type="text" id="scanInput" inputmode="numeric" autocomplete="off" placeholder="Barcode eingeben, z. B. 4056489123453"
+               class="flex-1 min-w-0 border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882]">
+        <button type="submit" class="btn btn-primary !text-sm !px-4">Suchen</button>
+      </form>
+      <div id="scanResult" class="mt-4"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let allReceipts = [], allProducts = [], allOffers = [], allLeaflets = [], appData = {}, receiptsById = new Map();
+// Account shown and the data version it was rendered from (null until something is rendered)
+let entryId = null, renderedSync = null, rendered = false;
+let chartMonthly, chartCategory, chartStores, chartModal;
+// Calls answered by the panel element, and the latest leaflet and search request
+let callCounter = 0, leafletRequest = 0, searchRequest = 0;
+const pendingCalls = new Map();
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+// Version of this page. After an update Home Assistant may still have the panel element of an older version loaded,
+// which does not know the new commands of the page
+const PAGE_VERSION = '1.3.2';
+// The version of the panel element and whether the Home Assistant app offers its barcode scanner, told by the element
+// before the data (elements before 1.3.2 tell nothing)
+let panelInfo = null;
+const CALL_TIMEOUT_MS = 60 * 1000;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const ESCAPES = {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'};
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ESCAPES[c]);
+// Only web addresses are used as links and images, never javascript: or data: from the API data
+const safeUrl = u => /^https?:\/\//i.test(String(u ?? '')) ? String(u) : '';
+const EURO = new Intl.NumberFormat('de-DE', {style:'currency', currency:'EUR'});
+const fmt = v => EURO.format(Number(v) || 0);
+const fmtNum = (v, digits = 2) =>
+  (Number(v) || 0).toLocaleString('de-DE', {minimumFractionDigits: digits, maximumFractionDigits: digits});
+const fmtQty = v => (Number(v) || 0).toLocaleString('de-DE', {maximumFractionDigits: 3});
+const toNum = v => parseFloat(String(v ?? '').replace(',', '.')) || 0;
+const monthKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const EXTERNAL = 'target="_blank" rel="noopener noreferrer"';
+
+function fmtDate(s) {
+  if (!s) return '–';
+  const d = new Date(s);
+  if (isNaN(d)) return esc(String(s).slice(0,10));
+  return d.toLocaleDateString('de-DE', {day:'2-digit', month:'2-digit', year:'numeric'});
+}
+function fmtDateTime(s) {
+  if (!s) return '–';
+  const d = new Date(s);
+  if (isNaN(d)) return String(s).slice(0,16).replace('T',' ');
+  return d.toLocaleString('de-DE', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+}
+// Days of leaflets like "2026-05-18" are local days, new Date() would read them as UTC
+function parseDay(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s ?? ''));
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(s);
+}
+function fmtDay(s) {
+  if (!s) return '–';
+  const d = parseDay(s);
+  if (isNaN(d)) return esc(String(s).slice(0,10));
+  const options = {weekday:'short', day:'2-digit', month:'2-digit'};
+  // Some leaflets run for years, like the one about the Lidl Plus benefits
+  if (d.getFullYear() !== new Date().getFullYear()) options.year = 'numeric';
+  return d.toLocaleDateString('de-DE', options);
+}
+// "bis Sa., 16.05." for current offers and leaflets, "ab Mo., 18.05." for upcoming ones
+function validity(entry) {
+  return entry.status === 'upcoming'
+    ? `<span class="badge badge-upcoming">ab ${fmtDay(entry.start)}</span>`
+    : `<span class="badge badge-current">bis ${fmtDay(entry.end)}</span>`;
+}
+
+function getPriceTrend(p) {
+  const hist = (p.price_history||[]).filter(h=>h.price>0);
+  if (hist.length < 2) return 'stable';
+  const prev = parseFloat(hist[hist.length-2].price);
+  const curr = parseFloat(hist[hist.length-1].price);
+  if (curr > prev * 1.005) return 'up';
+  if (curr < prev * 0.995) return 'down';
+  return 'stable';
+}
+
+// ── Data loading ──────────────────────────────────────────────────────────────
+// The Home Assistant panel element (panel.js) loads the data through the
+// authenticated websocket API and sends it to this page.
+window.addEventListener('message', event => {
+  if (event.source !== window.parent || event.origin !== location.origin) return;
+  const msg = event.data || {};
+  if (msg.type === 'lidl-plus:data') applyData(msg.data || {});
+  else if (msg.type === 'lidl-plus:error') showError('Daten konnten nicht geladen werden: ' + (msg.message || 'unbekannter Fehler'));
+  else if (msg.type === 'lidl-plus:menu') document.getElementById('menuBtn').classList.toggle('hidden', !msg.visible);
+  else if (msg.type === 'lidl-plus:panel') panelInfo = msg;
+  else if (msg.type === 'lidl-plus:result') settleCall(msg);
+});
+
+function requestData() {
+  // With known_sync the panel only gets the large lists if the data changed since
+  window.parent.postMessage({type:'lidl-plus:request', entry_id: entryId, known_sync: renderedSync}, location.origin);
+}
+
+// A call answered by the panel element with lidl-plus:result
+function postCall(message, timeout = CALL_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    const id = ++callCounter;
+    const timer = setTimeout(() => {
+      pendingCalls.delete(id);
+      reject(new Error('keine Antwort von Home Assistant'));
+    }, timeout);
+    pendingCalls.set(id, {resolve, reject, timer});
+    window.parent.postMessage({...message, id}, location.origin);
+  });
+}
+
+function settleCall(msg) {
+  const pending = pendingCalls.get(msg.id);
+  if (!pending) return;
+  pendingCalls.delete(msg.id);
+  clearTimeout(pending.timer);
+  // Unknown to an older panel element (or to Home Assistant before its restart after an update)
+  if (msg.error && /^Unknown command\.?$/.test(msg.error)) showReloadHint();
+  if (msg.error) pending.reject(new Error(msg.error));
+  else pending.resolve(msg.result);
+}
+
+function showReloadHint() {
+  document.getElementById('reloadBanner').classList.remove('hidden');
+}
+
+// True if Home Assistant has the panel element of another version loaded
+function panelOutdated() {
+  return !panelInfo || panelInfo.version !== PAGE_VERSION;
+}
+
+// Websocket command of the integration for the account shown
+function wsCall(type, fields) {
+  const request = {type, ...fields};
+  if (entryId) request.entry_id = entryId;
+  return postCall({type: 'lidl-plus:call', request});
+}
+
+function selectAccount(id) {
+  entryId = id;
+  renderedSync = null;
+  clearSearch();
+  requestData();
+}
+
+function updateAccountSelect(accounts) {
+  const sel = document.getElementById('accountSelect');
+  sel.classList.toggle('hidden', accounts.length < 2);
+  const signature = accounts.map(a => `${a.entry_id}=${a.title}`).join('|');
+  if (sel.dataset.signature !== signature) {
+    sel.innerHTML = accounts.map(a => `<option value="${esc(a.entry_id)}">${esc(a.title)}</option>`).join('');
+    sel.dataset.signature = signature;
+  }
+  if (entryId) sel.value = entryId;
+}
+
+function applyData(data) {
+  const accounts = data.accounts || [];
+  // Answer to a request made before switching the account
+  if (entryId && data.entry_id !== entryId && accounts.some(a => a.entry_id === entryId)) return;
+  entryId = data.entry_id || entryId;
+  updateAccountSelect(accounts);
+
+  document.getElementById('errorBanner').classList.add('hidden');
+  if (panelOutdated()) showReloadHint();
+  const warning = document.getElementById('syncWarning');
+  warning.textContent = data.last_error ? '⚠️ Letzte Synchronisierung fehlgeschlagen: ' + data.last_error : '';
+  warning.classList.toggle('hidden', !data.last_error);
+
+  // Nothing new since the last render, so opened receipts and filters stay as they are
+  if (data.unchanged) return;
+  appData = data;
+  allReceipts = data.receipts || [];
+  allProducts = data.products || [];
+  allOffers = data.offers || [];
+  allLeaflets = data.leaflets || [];
+  receiptsById = new Map(allReceipts.map(r => [String(r.id), r]));
+  document.getElementById('syncInfo').textContent = 'Stand: ' + fmtDateTime(data.last_sync);
+
+  // Every part on its own: a failing chart must not hide the receipts
+  const failed = [];
+  for (const [part, render] of [
+    ['Übersicht', renderOverview],
+    ['Kassenbons', () => { populateStoreFilter(); filterReceipts(); }],
+    ['Artikel', () => { renderBoughtArticles(); refreshArticles(); }],
+    ['Angebote', () => { renderOfferStores(); filterOffers(); }],
+    ['Prospekte', renderLeaflets],
+    ['Stoßzeiten', () => { if (document.getElementById('tab-busy').classList.contains('active')) renderBusy(); }],
+  ]) {
+    try {
+      render();
+    } catch (err) {
+      console.error(err);
+      failed.push(`${part} (${err.message})`);
+    }
+  }
+  rendered = true;
+  if (failed.length) {
+    // Without renderedSync the next request loads and renders everything again
+    renderedSync = null;
+    showError('Nicht alles konnte angezeigt werden: ' + failed.join(', '));
+    return;
+  }
+  renderedSync = data.version || data.last_sync || null;
+}
+
+function showError(message) {
+  const banner = document.getElementById('errorBanner');
+  banner.textContent = '⚠️ ' + message;
+  banner.classList.remove('hidden');
+  if (rendered) return;
+  document.getElementById('syncInfo').textContent = '–';
+  ['receiptList','productGrid','offerGrid','leafletGrid'].forEach(id => {
+    const el = document.getElementById(id);
+    el.className = 'text-center py-16 text-gray-400';
+    el.textContent = 'Keine Daten verfügbar.';
+  });
+}
+
+function toggleSidebar() {
+  window.parent.postMessage({type:'lidl-plus:toggle-menu'}, location.origin);
+}
+
+// ── Tab navigation ────────────────────────────────────────────────────────────
+function showTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+  // Charts need a visible canvas, so the busy hours are drawn when their tab is shown
+  if (name === 'busy') renderBusy();
+  // The article database is loaded when its tab is shown
+  if (name === 'products' && (!articlesFromServer || articlesStale)) loadArticles();
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+function toggleExportMenu(event) {
+  event.stopPropagation();
+  document.getElementById('exportMenu').classList.toggle('hidden');
+}
+
+document.addEventListener('click', () => document.getElementById('exportMenu').classList.add('hidden'));
+
+document.getElementById('exportMenu').addEventListener('click', event => {
+  const item = event.target.closest('[data-dataset]');
+  if (item) exportData(item.dataset.dataset, item.dataset.format);
+});
+
+// The panel element downloads the file, the browser saves it
+async function exportData(dataset, format) {
+  document.getElementById('exportMenu').classList.add('hidden');
+  const message = {type: 'lidl-plus:export', dataset};
+  if (format) message.format = format;
+  if (entryId) message.entry_id = entryId;
+  try {
+    await postCall(message);
+  } catch (err) {
+    showError('Export fehlgeschlagen: ' + err.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ÜBERSICHT
+// ══════════════════════════════════════════════════════════════════════════════
+function totalSpending() {
+  return appData.total_spent ?? allReceipts.reduce((s,r)=>s+(r.total||0), 0);
+}
+
+function renderOverview() {
+  const totalSpent = totalSpending();
+  const receiptCount = appData.total_tickets ?? allReceipts.length;
+  const avgBasket = appData.avg_basket || (receiptCount ? totalSpent/receiptCount : 0);
+
+  document.getElementById('overviewCards').innerHTML = [
+    {icon:'🧾', val:receiptCount,                    label:'Kassenbons',           color:'text-[#003882]'},
+    {icon:'📦', val:allProducts.length,              label:'Einzigartige Artikel', color:'text-purple-600'},
+    {icon:'💶', val:fmt(totalSpent),                 label:'Gesamtausgaben',       color:'text-green-600'},
+    {icon:'🛒', val:fmt(avgBasket),                  label:'Ø Einkauf',            color:'text-orange-500'},
+    {icon:'📅', val:fmt(appData.current_month),      label:'Diesen Monat',         color:'text-[#003882]'},
+    {icon:'💰', val:fmt(appData.savings_total),      label:'Gespart mit Rabatten', color:'text-green-600'},
+  ].map(c=>`
+    <div class="bg-white rounded-2xl p-4 shadow-sm text-center">
+      <div class="text-2xl mb-1.5">${c.icon}</div>
+      <div class="text-xl font-bold ${c.color}">${c.val}</div>
+      <div class="text-xs text-gray-400 mt-1">${c.label}</div>
+    </div>`).join('');
+
+  renderMonthlyChart();
+  renderCategoryChart();
+  renderStoresChart();
+}
+
+function renderMonthlyChart() {
+  const byMonth = {...(appData.spending_by_month || {})};
+  if (!Object.keys(byMonth).length) {
+    allReceipts.forEach(r => {
+      const m = (r.date||'').slice(0,7);
+      if (m) byMonth[m] = (byMonth[m]||0) + (r.total||0);
+    });
+  }
+  const savings = appData.savings_by_month || {};
+  const months = Object.keys(byMonth).sort().slice(-12);
+  const values = months.map(m => byMonth[m]);
+  const saved = months.map(m => savings[m] || 0);
+  const labels = months.map(m => {
+    const [y,mo] = m.split('-');
+    return new Date(+y, +mo-1, 1).toLocaleString('de-DE', {month:'short', year:'2-digit'});
+  });
+  const now = monthKey(new Date());
+  const datasets = [{
+    label: 'Ausgaben',
+    data: values,
+    backgroundColor: months.map(m => m===now ? '#ffed00' : 'rgba(0,56,130,0.75)'),
+    borderColor:      months.map(m => m===now ? '#d4c400' : '#003882'),
+    borderWidth: 1,
+    borderRadius: 6,
+  }];
+  if (saved.some(v => v > 0)) {
+    datasets.push({label: 'Gespart', data: saved, backgroundColor: 'rgba(22,163,74,0.7)', borderRadius: 6});
+  }
+
+  if (chartMonthly) chartMonthly.destroy();
+  chartMonthly = new Chart(document.getElementById('chartMonthly'), {
+    type: 'bar',
+    data: {labels, datasets},
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{
+        legend:{display: datasets.length > 1, position:'bottom'},
+        tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ${fmt(c.raw)}`}}
+      },
+      scales:{
+        y:{ticks:{callback:v=>fmtNum(v,0)+' €'}, grid:{color:'#f3f4f6'}},
+        x:{grid:{display:false}}
+      }
+    }
+  });
+}
+
+function renderCategoryChart() {
+  const food    = appData.food_total    || 0;
+  const nonfood = appData.nonfood_total || 0;
+  // Deposits and returns, receipts without articles
+  const unknown = Math.max(0, totalSpending() - food - nonfood);
+
+  if (chartCategory) chartCategory.destroy();
+  chartCategory = new Chart(document.getElementById('chartCategory'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Lebensmittel', 'Non-Food', 'Sonstiges (Pfand, ohne Artikel)'],
+      datasets: [{
+        data: [food, nonfood, unknown],
+        backgroundColor: ['#003882','#ffed00','#e5e7eb'],
+        borderWidth: 2, borderColor:'#fff',
+      }]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      cutout:'65%',
+      plugins:{
+        legend:{position:'bottom', labels:{font:{size:12}, padding:12}},
+        tooltip:{callbacks:{label:c=>` ${fmt(c.raw)} (${fmtNum(c.raw/(food+nonfood+unknown||1)*100, 1)} %)`}}
+      }
+    }
+  });
+}
+
+function renderStoresChart() {
+  const byStore = {...(appData.spending_by_store || {})};
+  if (!Object.keys(byStore).length) {
+    allReceipts.forEach(r => {
+      if (r.store) byStore[r.store] = (byStore[r.store]||0) + (r.total||0);
+    });
+  }
+  const sorted = Object.entries(byStore).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const labels = sorted.map(([k])=>k.length>22?k.slice(0,20)+'…':k);
+  const values = sorted.map(([,v])=>v);
+
+  if (chartStores) chartStores.destroy();
+  chartStores = new Chart(document.getElementById('chartStores'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: 'rgba(0,56,130,0.75)',
+        borderRadius: 5,
+      }]
+    },
+    options: {
+      indexAxis:'y',
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>` ${fmt(c.raw)}`}}},
+      scales:{
+        x:{ticks:{callback:v=>fmtNum(v,0)+' €'}, grid:{color:'#f3f4f6'}},
+        y:{grid:{display:false}}
+      }
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// KASSENBONS
+// ══════════════════════════════════════════════════════════════════════════════
+function populateStoreFilter() {
+  const stores = [...new Set(allReceipts.map(r=>r.store).filter(Boolean))].sort();
+  const sel = document.getElementById('receiptStore');
+  const selected = sel.value;
+  // Keep first "Alle Filialen" option
+  while (sel.options.length > 1) sel.remove(1);
+  stores.forEach(s => { const o=document.createElement('option'); o.value=s; o.textContent=s; sel.appendChild(o); });
+  if (stores.includes(selected)) sel.value = selected;
+}
+
+function filterReceipts() {
+  const q     = document.getElementById('receiptSearch').value.toLowerCase();
+  const sort  = document.getElementById('receiptSort').value;
+  const store = document.getElementById('receiptStore').value;
+  // Empty fields do not filter, receipts of a deposit return can be negative
+  const minV  = parseFloat(document.getElementById('receiptMin').value);
+  const maxV  = parseFloat(document.getElementById('receiptMax').value);
+  const from  = document.getElementById('receiptFrom').value;
+  const to    = document.getElementById('receiptTo').value;
+
+  let filtered = allReceipts.filter(r => {
+    if (store && r.store !== store) return false;
+    if (r.total < minV || r.total > maxV) return false; // comparisons with NaN are false
+    if (from && (r.date||'').slice(0,10) < from) return false;
+    if (to   && (r.date||'').slice(0,10) > to)   return false;
+    if (q) {
+      const inStore = (r.store||'').toLowerCase().includes(q);
+      const inItems = (r.items||[]).some(i=>(i.name||'').toLowerCase().includes(q));
+      if (!inStore && !inItems) return false;
+    }
+    return true;
+  });
+
+  filtered.sort((a,b) => {
+    if (sort==='date-desc')  return (b.date||'').localeCompare(a.date||'');
+    if (sort==='date-asc')   return (a.date||'').localeCompare(b.date||'');
+    if (sort==='total-desc') return b.total - a.total;
+    if (sort==='total-asc')  return a.total - b.total;
+    return 0;
+  });
+
+  const sum = filtered.reduce((s,r)=>s+r.total, 0);
+  document.getElementById('receiptCount').textContent =
+    `${filtered.length} von ${allReceipts.length} Kassenbons · Summe: ${fmt(sum)}`;
+
+  renderReceipts(filtered);
+}
+
+function renderReceipts(receipts) {
+  const el = document.getElementById('receiptList');
+  if (!receipts.length) {
+    el.className = 'text-center py-16 text-gray-400';
+    el.textContent = 'Keine Kassenbons gefunden.';
+    return;
+  }
+  el.className = '';
+  // The article tables are rendered when a receipt is opened
+  el.innerHTML = receipts.map(r => `
+    <div class="bg-white rounded-2xl shadow-sm mb-2 overflow-hidden">
+      <div class="flex items-center gap-3 px-4 py-3.5 cursor-pointer hover:bg-gray-50 select-none"
+           data-receipt-id="${esc(r.id)}" onclick="toggleReceipt(this)">
+        <span class="font-semibold text-[#003882] whitespace-nowrap text-sm">${fmtDate(r.date)}</span>
+        <span class="flex-1 text-gray-600 truncate">${esc(r.store||'Unbekannt')}</span>
+        ${r.visit && r.visit.status === 'ok' ? `<span class="text-xs text-gray-500 whitespace-nowrap" title="Zeit im Markt">🕒 ${esc(r.visit.minutes)} Min.</span>` : ''}
+        ${r.savings > 0 ? `<span class="text-xs text-green-600 whitespace-nowrap hidden sm:inline">${fmt(r.savings)} gespart</span>` : ''}
+        <span class="font-bold text-green-600 whitespace-nowrap">${fmt(r.total)}</span>
+        <span class="text-xs text-gray-400 whitespace-nowrap hidden sm:inline">${(r.items||[]).length} Artikel</span>
+        <span class="chevron text-gray-400 text-lg leading-none">›</span>
+      </div>
+      <div class="receipt-items border-t border-gray-100"></div>
+    </div>`).join('');
+}
+
+function renderReceiptItems(receipt) {
+  receipt = receipt || {};
+  const rows = (receipt.items || []).map(i => {
+    const price = toNum(i.unit_price);
+    const qty   = toNum(i.quantity) || 1;
+    const unit  = i.unit ? ' ' + esc(i.unit) : '';
+    // Amount printed on the receipt, the discounts follow in their own lines
+    const total = i.total != null ? toNum(i.total) : price * qty;
+    const deposit = i.is_deposit ? ' <span class="text-[10px] bg-gray-100 text-gray-500 rounded px-1.5 py-0.5">Pfand</span>' : '';
+    const discounts = (i.discounts || []).map(d => `<tr class="text-green-700">
+        <td class="pl-5 sm:pl-8 pr-2 sm:pr-4 py-1 text-xs" colspan="3">↳ ${esc(d.text || 'Rabatt')}</td>
+        <td class="px-2 sm:px-4 py-1 text-xs text-right whitespace-nowrap">${fmt(d.amount)}</td>
+      </tr>`).join('');
+    // Deposits are no articles of the article database
+    const article = i.is_deposit ? '' : ` data-article-key="nr:${esc(i.id)}"`;
+    return `<tr class="border-t border-gray-50 hover:bg-gray-50/70${article ? ' cursor-pointer' : ''}"${article}>
+      <td class="px-2 sm:px-4 py-2.5 text-gray-800">${esc(i.name||i.id)}${deposit}</td>
+      <td class="px-2 sm:px-4 py-2.5 text-gray-500 text-right whitespace-nowrap">${fmtQty(qty)}${unit}</td>
+      <td class="px-2 sm:px-4 py-2.5 text-gray-500 text-right whitespace-nowrap">${price?fmt(price)+(i.unit?'/'+esc(i.unit):''):'–'}</td>
+      <td class="px-2 sm:px-4 py-2.5 font-semibold text-right whitespace-nowrap">${fmt(total)}</td>
+    </tr>${discounts}`;
+  }).join('');
+
+  const summary = [];
+  if (receipt.visit) summary.push([`🕒 Im Markt: ${esc(visitText(receipt.visit))}`, null]);
+  (receipt.deposit_returns || []).forEach(d => summary.push([
+    'Pfandrückgabe' + (d.count ? ` (${esc(d.count)} × ${fmt(d.unit_amount)})` : ''), fmt(d.amount),
+  ]));
+  if (receipt.savings > 0) summary.push(['Gespart mit Rabatten', `<span class="text-green-600">${fmt(receipt.savings)}</span>`]);
+  (receipt.payments || []).forEach(p => summary.push([`Bezahlt mit ${esc(p.method)}`, p.amount != null ? fmt(p.amount) : '']));
+  if (receipt.points) summary.push(['Lidl Plus Punkte', esc(receipt.points)]);
+  summary.push(['<strong>Summe</strong>', `<strong>${fmt(receipt.total)}</strong>`]);
+
+  return `<table class="w-full text-sm">
+    <thead><tr class="bg-gray-50 text-xs text-gray-400 uppercase tracking-wide">
+      <th class="px-2 sm:px-4 py-2 text-left font-medium">Artikel</th>
+      <th class="px-2 sm:px-4 py-2 text-right font-medium">Menge</th>
+      <th class="px-2 sm:px-4 py-2 text-right font-medium"><span class="sm:hidden">Preis</span><span class="hidden sm:inline">Einzelpreis</span></th>
+      <th class="px-2 sm:px-4 py-2 text-right font-medium">Gesamt</th>
+    </tr></thead>
+    <tbody>${rows||'<tr><td colspan="4" class="px-2 sm:px-4 py-5 text-center text-gray-400">Keine Artikel</td></tr>'}</tbody>
+    <tfoot class="border-t-2 border-gray-100 text-gray-600">${summary.map(([label, value]) => value === null
+      ? `<tr><td class="px-2 sm:px-4 py-1.5" colspan="4">${label}</td></tr>`
+      : `<tr>
+      <td class="px-2 sm:px-4 py-1.5" colspan="3">${label}</td>
+      <td class="px-2 sm:px-4 py-1.5 text-right whitespace-nowrap">${value}</td>
+    </tr>`).join('')}</tfoot>
+  </table>`;
+}
+
+// An article of a receipt opens the article database
+document.getElementById('receiptList').addEventListener('click', event => {
+  const row = event.target.closest('tr[data-article-key]');
+  if (row) openArticle(row.dataset.articleKey);
+});
+
+function toggleReceipt(header) {
+  const items = header.nextElementSibling;
+  if (!items.dataset.rendered) {
+    items.innerHTML = renderReceiptItems(receiptsById.get(header.dataset.receiptId));
+    items.dataset.rendered = '1';
+  }
+  items.classList.toggle('open');
+  header.querySelector('.chevron').classList.toggle('open');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ARTIKEL (Artikeldatenbank)
+// ══════════════════════════════════════════════════════════════════════════════
+const ARTICLE_PAGE = 60;
+// Nutrition values per 100 g or 100 ml, like on the packages
+const NUTRIENTS = [
+  ['energy_kj', 'Energie', 'kJ'],
+  ['energy_kcal', 'Energie', 'kcal'],
+  ['fat', 'Fett', 'g'],
+  ['saturated_fat', 'davon gesättigte Fettsäuren', 'g'],
+  ['carbohydrates', 'Kohlenhydrate', 'g'],
+  ['sugars', 'davon Zucker', 'g'],
+  ['fiber', 'Ballaststoffe', 'g'],
+  ['protein', 'Eiweiß', 'g'],
+  ['salt', 'Salz', 'g'],
+];
+const IMAGE_KINDS = {nutrition: 'Nährwerte', ingredients: 'Zutaten / Inhaltsstoffe', front: 'Vorderseite', other: 'Sonstiges'};
+const INPUT = 'w-full border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-[#003882] bg-white';
+let articleResults = [], articleTotal = 0, articleRequest = 0, articleTimer = null;
+// The list comes from the article database once its tab was shown, until then the bought articles are shown
+let articlesFromServer = false, articlesStale = false;
+// Article of the dialog, its barcodes while they are edited, values taken from another database, and the page of a
+// leaflet a new article is added to when it is saved
+let currentArticle = null, editBarcodes = [], pendingSources = {}, pendingImage = '', pendingLeaflet = null;
+let articleDialogRequest = 0;
+
+// Only the photos of the integration, with their signed address
+const imageUrl = u => /^\/api\/lidl_plus\/images\/[0-9a-f]{32}(\?[\w.=&%-]*)?$/.test(String(u ?? '')) ? String(u) : '';
+const decimalText = v => v == null || v === '' ? '' : String(v).replace('.', ',');
+// "12,5" and "12.5" are numbers, an empty field has no value, everything else is NaN
+function parseDecimal(text) {
+  const value = String(text ?? '').replace(/\s/g, '').replace(',', '.');
+  if (!value) return null;
+  return /^\d+(\.\d+)?$/.test(value) ? parseFloat(value) : NaN;
+}
+
+// A bought article of the panel data in the form of the article database
+function productAsArticle(p) {
+  return {
+    key: `nr:${p.id}`, name: p.name || p.id, brand: '', image: '', sources: ['receipts'],
+    purchase_count: p.purchase_count, last_price: p.last_price, last_bought: p.last_date, last_seen: p.last_date,
+    unit: p.unit || '', price_trend: getPriceTrend(p), barcodes: [], has_nutrition: false, image_count: 0,
+    offer: null, leaflet: null,
+  };
+}
+
+function renderArticleStats(stats) {
+  const known = stats || {articles: null, bought: allProducts.length, with_details: null, with_nutrition: null};
+  document.getElementById('productStats').innerHTML = [
+    {val: known.articles, label: 'Artikel in der Datenbank', color: 'text-[#003882]'},
+    {val: known.bought, label: 'Davon gekauft', color: 'text-purple-600'},
+    {val: known.with_details, label: 'Mit eigenen Angaben', color: 'text-green-600'},
+    {val: known.with_nutrition, label: 'Mit Nährwerten', color: 'text-orange-500'},
+  ].map(c => `
+    <div class="bg-white rounded-2xl p-4 shadow-sm text-center">
+      <div class="text-lg font-bold ${c.color}">${c.val == null ? '…' : esc(c.val)}</div>
+      <div class="text-xs text-gray-400 mt-0.5">${c.label}</div>
+    </div>`).join('');
+}
+
+// Until the article database answered: the bought articles of the panel data
+function renderBoughtArticles() {
+  if (articlesFromServer) return;
+  articleResults = allProducts.map(productAsArticle);
+  articleTotal = articleResults.length;
+  renderArticleStats(null);
+  renderArticles();
+}
+
+// The list is loaded when its tab is shown, and again after new data
+function refreshArticles() {
+  if (document.getElementById('tab-products').classList.contains('active')) loadArticles();
+  else articlesStale = true;
+}
+
+function scheduleArticleSearch() {
+  clearTimeout(articleTimer);
+  articleTimer = setTimeout(() => loadArticles(), 300);
+}
+
+async function loadArticles(more = false) {
+  clearTimeout(articleTimer);
+  articlesStale = false;
+  const period = parseInt(document.getElementById('productPeriod').value) || 0;
+  const request = ++articleRequest;
+  const fields = {
+    query: document.getElementById('productSearch').value.trim(),
+    kind: document.getElementById('productKind').value,
+    sort: document.getElementById('productSort').value,
+    trend: document.getElementById('productTrend').value,
+    bought_since: period ? new Date(Date.now() - period * 864e5).toISOString().slice(0, 10) : '',
+    offset: more ? articleResults.length : 0,
+    limit: ARTICLE_PAGE,
+  };
+  document.getElementById('productCount').textContent = 'Suche…';
+  try {
+    const result = await wsCall('lidl_plus/articles', fields);
+    if (request !== articleRequest) return;
+    articlesFromServer = true;
+    articleResults = more ? articleResults.concat(result.articles || []) : (result.articles || []);
+    articleTotal = result.total || 0;
+    renderArticleStats(result.statistics);
+    renderArticles();
+  } catch (err) {
+    if (request !== articleRequest) return;
+    document.getElementById('productCount').textContent = 'Die Artikel konnten nicht geladen werden: ' + err.message;
+  }
+}
+
+function renderArticles() {
+  const grid = document.getElementById('productGrid');
+  document.getElementById('productCount').textContent = `${articleResults.length} von ${articleTotal} Artikeln`;
+  document.getElementById('productMore').classList.toggle('hidden', articleResults.length >= articleTotal);
+  if (!articleResults.length) {
+    const query = document.getElementById('productSearch').value.trim();
+    grid.className = 'text-center py-16 text-gray-400';
+    grid.innerHTML = query && articlesFromServer
+      ? `<p>Kein Artikel gefunden für „${esc(query)}“.</p>
+         <button type="button" class="btn btn-primary !text-sm !px-4 !py-2 mt-3" data-create-article>＋ „${esc(query)}“ als neuen Artikel anlegen</button>`
+      : 'Keine Artikel gefunden.';
+    return;
+  }
+  grid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3';
+  grid.innerHTML = articleResults.map(renderArticleCard).join('');
+}
+
+// Price of an article: paid last, otherwise of the newest offer or leaflet
+function articlePrice(a) {
+  if (a.last_price != null) return {value: a.last_price, label: 'zuletzt bezahlt'};
+  if (a.offer && a.offer.price != null) return {value: a.offer.price, label: 'im Angebot'};
+  if (a.leaflet && a.leaflet.price != null) return {value: a.leaflet.price, label: 'im Prospekt'};
+  return null;
+}
+
+function articleBadges(a) {
+  const sources = a.sources || [];
+  const badges = [];
+  if (a.purchase_count) badges.push(['bg-blue-50 text-[#003882]', `🧾 ${esc(a.purchase_count)}× gekauft`]);
+  const offer = a.offer || (a.offers || [])[0];
+  if (offer && offer.status && offer.status !== 'expired') {
+    badges.push([offer.status === 'upcoming' ? 'badge-upcoming' : 'badge-current', '🏷️ im Angebot']);
+  } else if (sources.includes('offers')) {
+    badges.push(['bg-gray-100 text-gray-600', '🏷️ Angebot']);
+  }
+  if (sources.includes('leaflets')) badges.push(['bg-gray-100 text-gray-600', '📰 Prospekt']);
+  if (sources.includes('own')) badges.push(['bg-purple-50 text-purple-700', '✏️ Eigener Artikel']);
+  if (a.has_nutrition) badges.push(['bg-green-50 text-green-700', '🥗 Nährwerte']);
+  const photos = a.image_count ?? (a.images || []).length;
+  if (photos) badges.push(['bg-gray-100 text-gray-600', `📷 ${esc(photos)}`]);
+  if ((a.barcodes || []).length) badges.push(['bg-gray-100 text-gray-600', '▮▯▮ Barcode']);
+  if (a.purchase_count && a.price_trend === 'up') badges.push(['bg-red-100 text-red-600', '↑ teurer']);
+  if (a.purchase_count && a.price_trend === 'down') badges.push(['bg-green-100 text-green-600', '↓ günstiger']);
+  return badges.map(([css, text]) => `<span class="badge ${css}">${text}</span>`).join(' ');
+}
+
+function renderArticleCard(a) {
+  const image = safeUrl(a.image), price = articlePrice(a), unit = a.unit ? '/' + esc(a.unit) : '';
+  const when = a.last_bought ? `gekauft ${fmtDate(a.last_bought)}` : a.last_seen ? `gesehen ${fmtDate(a.last_seen)}` : '';
+  return `<div class="bg-white rounded-2xl p-3.5 shadow-sm cursor-pointer hover:shadow-md transition-shadow flex gap-3" data-article-key="${esc(a.key)}">
+    ${image ? `<img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="w-16 h-16 object-contain shrink-0">`
+            : '<div class="w-16 h-16 shrink-0 rounded-xl bg-gray-50 flex items-center justify-center text-2xl">📦</div>'}
+    <div class="min-w-0 flex-1">
+      ${a.brand ? `<div class="text-[10px] uppercase tracking-wide text-gray-400 truncate">${esc(a.brand)}</div>` : ''}
+      <div class="font-semibold text-gray-800 leading-tight line-clamp-2">${esc(a.name || a.key)}</div>
+      <div class="flex flex-wrap gap-1 mt-1.5">${articleBadges(a)}</div>
+      <div class="flex items-baseline justify-between gap-2 mt-1.5">
+        ${price ? `<span class="text-sm font-bold text-[#003882]" title="${price.label}">${fmt(price.value)}${unit}</span>` : '<span></span>'}
+        <span class="text-[11px] text-gray-400 text-right">${when}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+document.getElementById('productGrid').addEventListener('click', event => {
+  if (event.target.closest('[data-create-article]')) {
+    newArticle({name: document.getElementById('productSearch').value.trim()});
+    return;
+  }
+  const card = event.target.closest('[data-article-key]');
+  if (card) openArticle(card.dataset.articleKey);
+});
+
+// ── Artikel-Dialog ────────────────────────────────────────────────────────────
+async function openArticle(key) {
+  if (!key) return;
+  const request = ++articleDialogRequest;
+  const product = key.startsWith('nr:') ? allProducts.find(p => `nr:${p.id}` === key) : null;
+  // Bought articles are shown right away, their details follow
+  renderArticle(product
+    ? {...productAsArticle(product), product, loading: true}
+    : {key, name: 'Lade Artikel…', sources: [], loading: true});
+  document.getElementById('productModal').classList.add('open');
+  try {
+    const article = await wsCall('lidl_plus/article', {key});
+    if (request === articleDialogRequest) renderArticle(article);
+  } catch (err) {
+    if (request !== articleDialogRequest) return;
+    document.getElementById('articleDetails').innerHTML =
+      `<p class="text-red-600 py-4">${esc('Der Artikel konnte nicht geladen werden: ' + err.message)}</p>`;
+  }
+}
+
+// A new article added by hand, e.g. with the values of Open Food Facts (prefill.sources: field -> database)
+function newArticle(prefill = {}) {
+  articleDialogRequest++;
+  renderArticle({
+    key: null, name: prefill.name || '', brand: prefill.brand || '', sources: ['own'], barcodes: prefill.barcodes || [],
+    package_size: prefill.package_size || '', nutrition: prefill.nutrition || {}, nutrition_basis: prefill.nutrition_basis || '100g',
+    ingredients: prefill.ingredients || '', notes: '', images: [], image: prefill.image || '',
+  });
+  pendingSources = {...(prefill.sources || {})};
+  pendingImage = prefill.image || '';
+  pendingLeaflet = prefill.leaflet || null;
+  if (pendingLeaflet) {
+    document.getElementById('articleFormStatus').textContent = `Wird nach dem Speichern auf Seite ${pendingLeaflet.page} des Prospekts ergänzt.`;
+  }
+  if (prefill.source) {
+    document.getElementById('articleFormStatus').textContent = `Angaben von ${prefill.source} – bitte prüfen und speichern.`;
+  }
+  document.getElementById('productModal').classList.add('open');
+}
+
+function renderArticle(a) {
+  currentArticle = a;
+  editBarcodes = [...(a.barcodes || [])];
+  pendingSources = {};
+  pendingImage = '';
+  pendingLeaflet = null;
+  document.getElementById('modalTitle').textContent = a.key ? (a.name || a.key) : 'Neuer Artikel';
+  document.getElementById('modalBrand').textContent = a.brand || '';
+  document.getElementById('articleHead').innerHTML = a.loading && !a.product ? '' : renderArticleHead(a);
+  renderPurchases(a.product);
+  document.getElementById('articleDetails').innerHTML = a.loading
+    ? '<p class="text-center py-6 text-gray-400">Lade Details…</p>'
+    : renderArticleForm(a) + renderArticlePhotos(a);
+  if (!a.loading) renderBarcodeChips();
+}
+
+function renderArticleHead(a) {
+  const front = (a.images || []).find(img => img.kind === 'front');
+  const image = (front && imageUrl(front.url)) || safeUrl(a.image);
+  const facts = [];
+  if ((a.receipt_names || []).length) facts.push(`Auf dem Kassenbon: ${esc(a.receipt_names.join(', '))}`);
+  if ((a.article_numbers || []).length) facts.push(`Artikelnummer: ${esc(a.article_numbers.join(', '))}`);
+  if (a.packaging) facts.push(`Packung laut Angebot: ${esc(a.packaging)}`);
+  if (a.price_per_unit) facts.push(`Grundpreis: ${esc(a.price_per_unit)}`);
+  if (a.category) facts.push(`Kategorie: ${esc(a.category.replace(/^Kategorien\//, '').split('/').join(' › '))}`);
+  const offers = (a.offers || []).map(o => `
+    <div class="flex items-center gap-2 py-1.5 border-b border-gray-50 last:border-0 text-sm">
+      <span class="flex-1 min-w-0 truncate">${esc(o.title)}${o.packaging ? ` <span class="text-xs text-gray-400">${esc(o.packaging)}</span>` : ''}</span>
+      <span class="font-semibold text-[#003882] shrink-0">${o.price != null ? fmt(o.price) : esc(o.price_text)}</span>
+      ${o.discount ? `<span class="badge bg-red-100 text-red-600 shrink-0">${esc(o.discount)}</span>` : ''}
+      <span class="shrink-0">${o.status === 'expired' ? `<span class="badge bg-gray-100 text-gray-500">bis ${fmtDate(o.end)}</span>` : validity(o)}</span>
+    </div>`).join('');
+  const leaflets = (a.leaflets || []).map(l => `
+    <div class="flex items-center gap-2 border-b border-gray-50 last:border-0">
+      <button type="button" class="flex-1 min-w-0 flex items-center gap-2 py-1.5 text-sm text-left hover:bg-gray-50" data-leaflet-id="${esc(l.id)}">
+        <span class="flex-1 min-w-0 truncate">${esc([l.name, l.title].filter(Boolean).join(' · '))}</span>
+        ${(l.added_pages || []).length ? '<span class="text-[10px] text-[#003882] shrink-0">von dir ergänzt</span>' : ''}
+        ${(l.pages || []).length ? `<span class="text-xs text-gray-400 shrink-0">S. ${l.pages.map(esc).join(', ')}</span>` : ''}
+        ${l.price != null ? `<span class="font-semibold text-[#003882] shrink-0">${fmt(l.price)}</span>` : ''}
+      </button>
+      ${(l.added_pages || []).length ? `<button type="button" class="text-xs text-red-600 px-1 shrink-0" data-unlink-leaflet="${esc(l.id)}"
+        title="Zuordnung zum Prospekt entfernen" aria-label="Zuordnung zum Prospekt entfernen">✕</button>` : ''}
+    </div>`).join('');
+  const url = safeUrl(a.url);
+  return `<div class="flex gap-4 mb-4">
+      ${image ? `<img src="${esc(image)}" alt="" referrerpolicy="no-referrer" class="w-24 h-24 object-contain shrink-0 rounded-xl bg-gray-50">` : ''}
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap gap-1 mb-2">${articleBadges(a)}</div>
+        ${facts.map(fact => `<div class="text-xs text-gray-500">${fact}</div>`).join('')}
+        ${url ? `<a class="btn mt-2" href="${esc(url)}" ${EXTERNAL}>🌐 Im Lidl-Onlineshop</a>` : ''}
+      </div>
+    </div>
+    ${a.description ? `<p class="text-xs text-gray-600 mb-4 whitespace-pre-line line-clamp-6">${esc(a.description)}</p>` : ''}
+    ${offers ? `<h3 class="section-title">🏷️ Angebote</h3><div class="mb-4">${offers}</div>` : ''}
+    ${leaflets ? `<h3 class="section-title">📰 In Prospekten</h3><div class="mb-4">${leaflets}</div>` : ''}`;
+}
+
+// A leaflet of the article opens the leaflet dialog, which lies below this one
+document.getElementById('articleHead').addEventListener('click', async event => {
+  const unlink = event.target.closest('[data-unlink-leaflet]');
+  if (unlink) {
+    if (!armed(unlink, 'Entfernen?')) return;
+    try {
+      const saved = await wsCall('lidl_plus/article_leaflet', {key: currentArticle.key, leaflet_id: unlink.dataset.unlinkLeaflet, remove: true});
+      renderArticle(saved);
+      document.getElementById('articleFormStatus').textContent = '✓ Aus dem Prospekt entfernt';
+      reloadLeaflet();
+    } catch (err) {
+      document.getElementById('articleFormStatus').textContent = '⚠️ ' + err.message;
+    }
+    return;
+  }
+  const leaflet = event.target.closest('[data-leaflet-id]');
+  if (!leaflet) return;
+  closeProductModal();
+  openLeaflet(leaflet.dataset.leafletId);
+});
+
+// Purchases of a bought article: statistics, price chart and history
+function renderPurchases(p) {
+  if (chartModal) { chartModal.destroy(); chartModal = null; }
+  document.getElementById('articlePurchases').classList.toggle('hidden', !p);
+  if (!p) return;
+
+  const trend = getPriceTrend(p);
+  const trendLabel = trend==='up' ? ' ↑ teurer' : trend==='down' ? ' ↓ günstiger' : '';
+  const trendColor = trend==='up' ? 'text-red-500' : trend==='down' ? 'text-green-500' : 'text-gray-500';
+  const unit = p.unit ? '/' + esc(p.unit) : '';
+
+  document.getElementById('modalStats').innerHTML = [
+    {label:'Käufe gesamt',    val:p.purchase_count+'×'},
+    {label:'Menge gesamt',    val:fmtQty(p.total_quantity) + (p.unit ? ' ' + esc(p.unit) : '')},
+    {label:'Ausgaben gesamt', val:fmt(p.total_spent)},
+    {label:'Ø Preis',         val:fmt(p.avg_price) + unit},
+    {label:'Akt. Preis',      val:`<span class="font-bold ${trendColor}">${fmt(p.last_price)}${unit}${trendLabel}</span>`},
+    {label:'Zuletzt',         val:fmtDate(p.last_date)},
+  ].map(s=>`
+    <div class="bg-gray-50 rounded-xl p-2.5 text-center">
+      <div class="text-[10px] text-gray-400 uppercase tracking-wide">${s.label}</div>
+      <div class="font-semibold text-gray-800 mt-0.5 text-sm">${s.val}</div>
+    </div>`).join('');
+  document.getElementById('modalSavings').textContent =
+    p.savings > 0 ? `💰 Mit Rabatten und Coupons gespart: ${fmt(p.savings)}` : '';
+
+  const hist = (p.price_history||[]).filter(h=>h.price>0);
+  const wrapper = document.getElementById('modalChartWrapper');
+
+  if (hist.length > 1) {
+    wrapper.style.display = 'block';
+    chartModal = new Chart(document.getElementById('modalPriceChart'), {
+      type:'line',
+      data:{
+        labels: hist.map(h=>fmtDate(h.date)),
+        datasets:[{
+          label:'Preis (€)',
+          data: hist.map(h=>parseFloat(h.price)),
+          borderColor:'#003882',
+          backgroundColor:'rgba(0,56,130,0.07)',
+          fill:true,
+          tension:0.35,
+          pointRadius:4,
+          pointBackgroundColor:'#003882',
+          pointBorderColor:'#fff',
+          pointBorderWidth:2,
+        }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>` ${fmt(c.raw)}`}}},
+        scales:{
+          y:{ticks:{callback:v=>fmtNum(v)+' €'}, grid:{color:'#f3f4f6'}},
+          x:{grid:{display:false}, ticks:{maxRotation:40, font:{size:11}}}
+        }
+      }
+    });
+  } else {
+    wrapper.style.display = 'none';
+  }
+
+  document.getElementById('modalHistory').innerHTML = hist.length
+    ? hist.slice().reverse().map(h=>`
+        <div class="flex justify-between items-center py-2.5 border-b border-gray-50 text-sm last:border-0">
+          <span class="text-gray-500 shrink-0">${fmtDate(h.date)}</span>
+          <span class="text-gray-400 text-xs truncate mx-3 flex-1">${esc(h.store||'')}</span>
+          ${h.discount ? `<span class="text-green-600 text-xs shrink-0 mr-2">Rabatt ${fmt(h.discount)}</span>` : ''}
+          <span class="font-semibold text-gray-800 shrink-0">${fmt(h.price)}${unit}</span>
+        </div>`).join('')
+    : '<p class="text-center py-4 text-gray-400 text-sm">Keine Preishistorie verfügbar</p>';
+}
+
+// Name, brand, barcodes, package size, nutrition values, ingredients and notes
+function renderArticleForm(a) {
+  const own = !a.key || (a.sources || []).includes('own');
+  const nutrition = a.nutrition || {};
+  const source = field => (a.sources_of_details || {})[field]
+    ? `<span class="text-[10px] text-gray-400">(Quelle: ${esc(a.sources_of_details[field])})</span>` : '';
+  // Name and brand of Lidl are the placeholders, only a changed name is shown in the field
+  const name = own ? a.name : (a.name !== a.lidl_name ? a.name : '');
+  const brand = own ? a.brand : (a.brand !== a.lidl_brand ? a.brand : '');
+  return `<h3 class="section-title mt-5">✏️ Deine Angaben</h3>
+  <form id="articleForm" class="space-y-3" onsubmit="saveArticle(event)">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <label class="block"><span class="text-xs text-gray-500">${own ? 'Name *' : 'Eigener Name (statt dem von Lidl)'}</span>
+        <input name="name" maxlength="200" value="${esc(name)}" placeholder="${esc(own ? 'z. B. Duschgel Sensitive' : a.lidl_name || '')}" class="${INPUT}"></label>
+      <label class="block"><span class="text-xs text-gray-500">Marke</span>
+        <input name="brand" maxlength="100" value="${esc(brand)}" placeholder="${esc(own ? '' : a.lidl_brand || '')}" class="${INPUT}"></label>
+      <label class="block"><span class="text-xs text-gray-500">Packungsgröße ${source('package_size')}</span>
+        <input name="package_size" maxlength="100" value="${esc(a.package_size)}" placeholder="${esc(a.packaging || 'z. B. 500 g')}" class="${INPUT}"></label>
+      <div><span class="text-xs text-gray-500">Barcodes (EAN)</span>
+        <div id="barcodeChips" class="flex flex-wrap gap-1.5 my-1"></div>
+        <div class="flex gap-1.5">
+          <input id="barcodeInput" inputmode="numeric" autocomplete="off" placeholder="Barcode eingeben" class="${INPUT} !py-1.5">
+          <button type="button" class="btn" onclick="addBarcodeFromInput()" title="Barcode hinzufügen" aria-label="Barcode hinzufügen">＋</button>
+          <button type="button" class="btn" onclick="openScanner(true)" title="Barcode scannen" aria-label="Barcode scannen">📷</button>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="text-xs text-gray-500">Nährwerte ${source('nutrition')}</span>
+        <select name="nutrition_basis" class="border border-gray-200 rounded-xl px-2 py-1 bg-white text-xs">
+          <option value="100g"${a.nutrition_basis === '100ml' ? '' : ' selected'}>pro 100 g</option>
+          <option value="100ml"${a.nutrition_basis === '100ml' ? ' selected' : ''}>pro 100 ml</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1.5">${NUTRIENTS.map(([key, label, unit]) => `
+        <label class="flex flex-col justify-between"><span class="text-[11px] text-gray-500">${label} (${unit})</span>
+          <input name="n_${key}" inputmode="decimal" autocomplete="off" value="${esc(decimalText(nutrition[key]))}" class="${INPUT} !py-1.5"></label>`).join('')}
+      </div>
+    </div>
+    <label class="block"><span class="text-xs text-gray-500">Zutaten / Inhaltsstoffe – auch bei Non-Food, z. B. Kosmetik oder Reiniger ${source('ingredients')}</span>
+      <textarea name="ingredients" rows="4" maxlength="10000" class="${INPUT}">${esc(a.ingredients)}</textarea></label>
+    <label class="block"><span class="text-xs text-gray-500">Notizen</span>
+      <textarea name="notes" rows="2" maxlength="10000" class="${INPUT}">${esc(a.notes)}</textarea></label>
+    <div class="flex flex-wrap gap-2 items-center">
+      <button type="submit" class="btn btn-primary !text-sm !px-4 !py-2">Speichern</button>
+      <button type="button" class="btn !text-sm !py-2" onclick="lookupForArticle()">🔎 Open Food Facts</button>
+      ${a.key && (a.has_details || own) ? `<button type="button" class="btn !text-sm !py-2 !text-red-600" id="articleDelete">${own ? '🗑️ Artikel löschen' : '🗑️ Angaben löschen'}</button>` : ''}
+      <span id="articleFormStatus" class="text-xs text-gray-500"></span>
+    </div>
+  </form>`;
+}
+
+function renderBarcodeChips() {
+  const box = document.getElementById('barcodeChips');
+  if (!box) return;
+  box.innerHTML = editBarcodes.length
+    ? editBarcodes.map(code => `<span class="badge bg-gray-100 text-gray-700 font-mono">${esc(code)}
+        <button type="button" class="ml-1 text-red-600" data-remove-barcode="${esc(code)}" aria-label="Barcode entfernen">✕</button></span>`).join('')
+    : '<span class="text-xs text-gray-400">Noch kein Barcode</span>';
+}
+
+function addBarcodeFromInput() {
+  const input = document.getElementById('barcodeInput');
+  if (addBarcode(input.value)) input.value = '';
+}
+
+// Adds a barcode to the article of the dialog, it is saved with the article
+function addBarcode(text) {
+  const status = document.getElementById('articleFormStatus');
+  const code = String(text ?? '').replace(/[\s-]/g, '');
+  if (!/^\d{8,14}$/.test(code)) {
+    if (status) status.textContent = '⚠️ Ein Barcode (EAN) hat 8 bis 14 Ziffern.';
+    return false;
+  }
+  if (!editBarcodes.includes(code)) editBarcodes.push(code);
+  renderBarcodeChips();
+  if (status) status.textContent = 'Barcode hinzugefügt – Speichern nicht vergessen.';
+  return true;
+}
+
+async function saveArticle(event) {
+  if (event) event.preventDefault();
+  const form = document.getElementById('articleForm');
+  const status = document.getElementById('articleFormStatus');
+  const a = currentArticle;
+  // A typed barcode counts even without a click on +
+  const typed = document.getElementById('barcodeInput');
+  if (typed.value.trim() && !addBarcode(typed.value)) return;
+  typed.value = '';
+  const nutrition = {};
+  for (const [key, label, unit] of NUTRIENTS) {
+    const value = parseDecimal(form.elements[`n_${key}`].value);
+    if (Number.isNaN(value)) {
+      status.textContent = `⚠️ ${label} (${unit}): bitte eine Zahl eingeben, z. B. 12,5`;
+      return;
+    }
+    nutrition[key] = value;
+  }
+  const fields = {
+    name: form.elements.name.value.trim(),
+    brand: form.elements.brand.value.trim(),
+    package_size: form.elements.package_size.value.trim(),
+    ingredients: form.elements.ingredients.value.trim(),
+    notes: form.elements.notes.value.trim(),
+    nutrition,
+    nutrition_basis: form.elements.nutrition_basis.value,
+    barcodes: editBarcodes,
+  };
+  if (pendingImage) fields.image = pendingImage;
+  if (Object.keys(pendingSources).length) fields.sources = pendingSources;
+  if (a.key) {
+    fields.key = a.key;
+  } else if (!fields.name) {
+    status.textContent = '⚠️ Ein neuer Artikel braucht einen Namen.';
+    return;
+  }
+  status.textContent = 'Speichere…';
+  const leaflet = a.key ? null : pendingLeaflet;
+  try {
+    let saved = await wsCall('lidl_plus/article_save', fields);
+    if (leaflet) saved = await wsCall('lidl_plus/article_leaflet', {key: saved.key, ...leaflet});
+    renderArticle(saved);
+    document.getElementById('articleFormStatus').textContent = leaflet ? `✓ Gespeichert und auf Seite ${leaflet.page} ergänzt` : '✓ Gespeichert';
+    if (leaflet) reloadLeaflet(`✓ ${saved.name} auf Seite ${leaflet.page} ergänzt`);
+    if (articlesFromServer) loadArticles();
+  } catch (err) {
+    status.textContent = '⚠️ ' + err.message;
+  }
+}
+
+// Values of Open Food Facts for the barcode of the article, only empty fields are filled
+async function lookupForArticle() {
+  const status = document.getElementById('articleFormStatus');
+  const code = editBarcodes[0] || document.getElementById('barcodeInput').value.replace(/[\s-]/g, '');
+  if (!code) {
+    status.textContent = 'Erst einen Barcode eingeben oder scannen.';
+    return;
+  }
+  status.textContent = 'Frage Open Food Facts…';
+  try {
+    const result = await wsCall('lidl_plus/barcode', {code, lookup: true});
+    if (!result.product) {
+      status.textContent = result.lookup_error
+        ? `Open Food Facts ist nicht erreichbar: ${result.lookup_error}`
+        : 'Open Food Facts kennt diesen Barcode nicht.';
+      return;
+    }
+    const taken = applyProduct(result.product);
+    status.textContent = taken.length
+      ? `Von ${result.product.source} übernommen: ${taken.join(', ')} – bitte prüfen und speichern.`
+      : `${result.product.source} hat keine Angaben für die leeren Felder.`;
+  } catch (err) {
+    status.textContent = '⚠️ ' + err.message;
+  }
+}
+
+// Fills the empty fields of the form with the values of a product of Open Food Facts, returns what was filled
+function applyProduct(product) {
+  const form = document.getElementById('articleForm');
+  const taken = [];
+  const fill = (name, value, label, source) => {
+    if (!value || form.elements[name].value.trim()) return;
+    form.elements[name].value = value;
+    taken.push(label);
+    pendingSources[source] = product.source;
+  };
+  if (!currentArticle.key || (currentArticle.sources || []).includes('own')) {
+    fill('name', product.name, 'Name', 'name');
+    fill('brand', product.brand, 'Marke', 'brand');
+  }
+  fill('package_size', product.quantity, 'Packungsgröße', 'package_size');
+  fill('ingredients', product.ingredients, 'Zutaten', 'ingredients');
+  const nutrition = product.nutrition || {};
+  const empty = NUTRIENTS.every(([key]) => !form.elements[`n_${key}`].value.trim());
+  if (Object.keys(nutrition).length && empty) {
+    NUTRIENTS.forEach(([key]) => { form.elements[`n_${key}`].value = decimalText(nutrition[key]); });
+    form.elements.nutrition_basis.value = product.nutrition_basis === '100ml' ? '100ml' : '100g';
+    taken.push('Nährwerte');
+    pendingSources.nutrition = product.source;
+  }
+  if (safeUrl(product.image) && !currentArticle.image) {
+    pendingImage = product.image;
+    pendingSources.image = product.source;
+  }
+  return taken;
+}
+
+// A second click within 4 seconds confirms, the Home Assistant app shows no confirm() dialogs
+function armed(button, question) {
+  if (button.dataset.armed) return true;
+  const original = button.innerHTML;
+  button.dataset.armed = '1';
+  button.textContent = question;
+  setTimeout(() => {
+    if (!button.isConnected || !button.dataset.armed) return;
+    delete button.dataset.armed;
+    button.innerHTML = original;
+  }, 4000);
+  return false;
+}
+
+document.getElementById('articleDetails').addEventListener('click', async event => {
+  const remove = event.target.closest('[data-remove-barcode]');
+  if (remove) {
+    editBarcodes = editBarcodes.filter(code => code !== remove.dataset.removeBarcode);
+    renderBarcodeChips();
+    document.getElementById('articleFormStatus').textContent = 'Barcode entfernt – Speichern nicht vergessen.';
+    return;
+  }
+  const photo = event.target.closest('[data-delete-image]');
+  if (photo) {
+    if (!armed(photo, 'Löschen?')) return;
+    const status = document.getElementById('photoStatus');
+    try {
+      const saved = await wsCall('lidl_plus/article_image_delete', {key: currentArticle.key, image_id: photo.dataset.deleteImage});
+      if (saved) renderArticle(saved);
+    } catch (err) {
+      status.textContent = '⚠️ ' + err.message;
+    }
+    return;
+  }
+  const removeArticle = event.target.closest('#articleDelete');
+  if (removeArticle) {
+    if (!armed(removeArticle, 'Wirklich löschen?')) return;
+    const status = document.getElementById('articleFormStatus');
+    try {
+      const result = await wsCall('lidl_plus/article_delete', {key: currentArticle.key});
+      if (result) {
+        renderArticle(result);
+        document.getElementById('articleFormStatus').textContent = '✓ Deine Angaben wurden gelöscht';
+      } else {
+        closeProductModal();
+      }
+      if (articlesFromServer) loadArticles();
+    } catch (err) {
+      status.textContent = '⚠️ ' + err.message;
+    }
+  }
+});
+
+document.getElementById('articleDetails').addEventListener('keydown', event => {
+  // Enter in the barcode field adds the barcode instead of saving
+  if (event.key === 'Enter' && event.target.id === 'barcodeInput') {
+    event.preventDefault();
+    addBarcodeFromInput();
+  }
+});
+
+document.getElementById('articleDetails').addEventListener('change', event => {
+  if (event.target.matches('[data-photo-input]')) uploadPhoto(event.target);
+});
+
+// ── Fotos ─────────────────────────────────────────────────────────────────────
+function renderArticlePhotos(a) {
+  if (!a.key) return '<p class="text-xs text-gray-400 mt-5">Fotos kannst du hinzufügen, sobald der Artikel gespeichert ist.</p>';
+  const photos = (a.images || []).map(img => {
+    const url = imageUrl(img.url), kind = IMAGE_KINDS[img.kind] || 'Foto';
+    return `<div class="relative">
+      ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener"><img src="${esc(url)}" alt="${esc(kind)}" loading="lazy"
+        class="w-full h-24 object-cover rounded-lg border border-gray-100 bg-gray-50"></a>` : ''}
+      <div class="text-[10px] text-gray-500 text-center mt-0.5">${esc(kind)}</div>
+      <button type="button" class="absolute top-1 right-1 bg-white/90 rounded-full px-1.5 text-xs text-red-600 shadow"
+        data-delete-image="${esc(img.id)}" aria-label="Foto löschen">✕</button>
+    </div>`;
+  }).join('');
+  return `<h3 class="section-title mt-6">📷 Fotos</h3>
+    ${photos ? `<div class="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-2">${photos}</div>`
+             : '<p class="text-xs text-gray-400 mb-2">Noch keine Fotos, z. B. von der Nährwerttabelle oder der Zutatenliste.</p>'}
+    <div class="flex flex-wrap gap-2 items-center">
+      <select id="photoKind" class="border border-gray-200 rounded-xl px-2 py-1.5 bg-white text-xs" aria-label="Was zeigt das Foto?">
+        ${Object.entries(IMAGE_KINDS).map(([kind, label]) => `<option value="${kind}">${label}</option>`).join('')}
+      </select>
+      <label class="btn !text-sm !py-2 cursor-pointer">📷 Foto aufnehmen<input type="file" accept="image/*" capture="environment" class="hidden" data-photo-input></label>
+      <label class="btn !text-sm !py-2 cursor-pointer">🖼️ Aus der Galerie<input type="file" accept="image/*" class="hidden" data-photo-input></label>
+      <span id="photoStatus" class="text-xs text-gray-500"></span>
+    </div>`;
+}
+
+// Photos of phones have many megapixels, 1600 pixels are enough to read a nutrition label
+async function shrinkPhoto(file, maxSize = 1600) {
+  const image = await new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Das Foto konnte nicht gelesen werden')); };
+    img.src = url;
+  });
+  const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(image.naturalWidth * scale);
+  canvas.height = Math.round(image.naturalHeight * scale);
+  canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+  return dataUrl.slice(dataUrl.indexOf(',') + 1);
+}
+
+async function uploadPhoto(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file || !currentArticle || !currentArticle.key) return;
+  const status = document.getElementById('photoStatus');
+  const kind = document.getElementById('photoKind').value;
+  status.textContent = 'Lade das Foto hoch…';
+  try {
+    const data = await shrinkPhoto(file);
+    const saved = await wsCall('lidl_plus/article_image', {key: currentArticle.key, kind, data});
+    renderArticle(saved);
+    document.getElementById('photoStatus').textContent = '✓ Foto gespeichert';
+  } catch (err) {
+    const current = document.getElementById('photoStatus');
+    if (current) current.textContent = '⚠️ ' + err.message;
+  }
+}
+
+function closeProductModal() {
+  articleDialogRequest++;
+  document.getElementById('productModal').classList.remove('open');
+  if (chartModal) { chartModal.destroy(); chartModal = null; }
+}
+
+// ── Barcode scannen ───────────────────────────────────────────────────────────
+// The scanner of the Home Assistant app waits for the user, a scan may take a while
+const SCAN_TIMEOUT_MS = 10 * 60 * 1000;
+// forArticle: the barcode is added to the article of the dialog instead of being looked up
+let scanForArticle = false, scanRequest = 0, lastScan = null, cameraStream = null, cameraTimer = null;
+
+async function openScanner(forArticle = false) {
+  scanForArticle = forArticle;
+  const request = ++scanRequest;
+  lastScan = null;
+  document.getElementById('scanResult').innerHTML = '';
+  document.getElementById('scanInput').value = '';
+  document.getElementById('scanHint').textContent = '';
+  document.getElementById('scanModal').classList.add('open');
+  // Without the scanner of the app: 2. the camera of the browser, 3. typing the digits below the bars
+  if (panelInfo && !panelInfo.scanner) {
+    startCamera(request, panelInfo.app ? 'Deine Home-Assistant-App bietet keinen Barcode-Scanner an, bitte aktualisiere die App.' : '');
+    document.getElementById('scanInput').focus();
+    return;
+  }
+  // Elements before 1.3.2 tell nothing about the scanner: the ones of 1.3.0 and 1.3.1 open it, older ones never answer
+  if (!panelInfo) {
+    document.getElementById('scanHint').textContent =
+      'Öffnet sich der Scanner der App nicht, schließe die Home-Assistant-App ganz und öffne sie neu. Bis dahin kannst du den Barcode eintippen.';
+  }
+  // 1. The barcode scanner of the Home Assistant app
+  let result;
+  try {
+    result = await postCall({type: 'lidl-plus:scan'}, SCAN_TIMEOUT_MS);
+  } catch (err) {
+    result = {unsupported: true};
+  }
+  if (request !== scanRequest) return;
+  if (result && result.code) return handleBarcode(result.code);
+  if (result && result.cancelled && result.reason !== 'alternative_options') {
+    closeScanModal();
+    return;
+  }
+  // 2. The camera in the browser, 3. typing the digits below the bars
+  if (result && result.unsupported) startCamera(request);
+  document.getElementById('scanInput').focus();
+}
+
+// reason: why the scanner of the app is not used, shown with the camera
+async function startCamera(request, reason = '') {
+  const hint = document.getElementById('scanHint');
+  if (!('BarcodeDetector' in window) || !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+    hint.textContent = reason
+      ? `${reason} Bis dahin: tippe die Ziffern unter dem Strichcode ein.`
+      : 'Dieser Browser kann keine Barcodes lesen: tippe die Ziffern unter dem Strichcode ein. In der Home-Assistant-App öffnet sich der Scanner.';
+    return;
+  }
+  hint.textContent = reason;
+  try {
+    const supported = await window.BarcodeDetector.getSupportedFormats();
+    const formats = ['ean_13', 'ean_8', 'upc_a', 'upc_e'].filter(format => supported.includes(format));
+    if (!formats.length) throw new Error('keine Strichcodes');
+    const detector = new window.BarcodeDetector({formats});
+    const stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'environment'}, audio: false});
+    if (request !== scanRequest) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
+    cameraStream = stream;
+    const video = document.getElementById('scanVideo');
+    video.srcObject = stream;
+    await video.play();
+    document.getElementById('scanCamera').classList.remove('hidden');
+    const detect = async () => {
+      if (!cameraStream || request !== scanRequest) return;
+      try {
+        const codes = await detector.detect(video);
+        if (codes.length) return handleBarcode(codes[0].rawValue);
+      } catch (err) {
+        // the next picture may work
+      }
+      cameraTimer = setTimeout(detect, 250);
+    };
+    detect();
+  } catch (err) {
+    stopCamera();
+    hint.textContent = `${reason ? reason + ' ' : ''}Die Kamera ist nicht verfügbar (${err.message}): tippe die Ziffern unter dem Strichcode ein.`;
+  }
+}
+
+function stopCamera() {
+  clearTimeout(cameraTimer);
+  if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+  cameraStream = null;
+  document.getElementById('scanCamera').classList.add('hidden');
+}
+
+function closeScanModal() {
+  scanRequest++;
+  stopCamera();
+  document.getElementById('scanModal').classList.remove('open');
+}
+
+function submitBarcode(event) {
+  event.preventDefault();
+  const code = document.getElementById('scanInput').value;
+  if (code.trim()) handleBarcode(code);
+}
+
+async function handleBarcode(text) {
+  stopCamera();
+  const code = String(text ?? '').replace(/[\s-]/g, '');
+  document.getElementById('scanInput').value = code;
+  if (scanForArticle) {
+    closeScanModal();
+    addBarcode(code);
+    return;
+  }
+  const box = document.getElementById('scanResult');
+  box.innerHTML = '<p class="text-gray-400">Suche den Barcode…</p>';
+  const request = ++scanRequest;
+  try {
+    const result = await wsCall('lidl_plus/barcode', {code});
+    if (request !== scanRequest) return;
+    lastScan = result;
+    if (result.articles.length === 1) {
+      closeScanModal();
+      openArticle(result.articles[0].key);
+      return;
+    }
+    box.innerHTML = renderScanResult(result);
+    if (!result.articles.length && result.product && result.product.name) {
+      // A broad search: names of Open Food Facts are longer than the ones of Lidl
+      const word = result.product.name.split(/[\s,]+/).find(part => part.length > 3) || result.product.name;
+      document.getElementById('linkSearch').value = word;
+      searchLinkCandidates();
+    }
+  } catch (err) {
+    if (request === scanRequest) box.innerHTML = `<p class="text-red-600">${esc(err.message)}</p>`;
+  }
+}
+
+function renderScanResult(result) {
+  const product = result.product;
+  if (result.articles.length > 1) {
+    return `<h3 class="section-title">Mehrere Artikel haben diesen Barcode</h3>${result.articles.map(renderLinkRow).join('')}`;
+  }
+  return `<p class="text-sm text-gray-700 mb-3">Der Barcode <strong class="font-mono">${esc(result.code)}</strong> gehört noch zu keinem Artikel.</p>
+    ${product ? renderScannedProduct(product) : `<p class="text-xs text-gray-500 mb-3">${esc(result.lookup_error
+      ? 'Open Food Facts ist nicht erreichbar: ' + result.lookup_error
+      : 'Auch Open Food Facts kennt ihn nicht – die Angaben kannst du selbst eintragen.')}</p>`}
+    <h3 class="section-title mt-4">Zu welchem Artikel gehört er?</h3>
+    <form class="flex gap-2" onsubmit="searchLinkCandidates(event)">
+      <input type="search" id="linkSearch" autocomplete="off" placeholder="Artikel suchen, z. B. Skyr" class="${INPUT}">
+      <button type="submit" class="btn">Suchen</button>
+    </form>
+    <div id="linkResults" class="mt-2"></div>
+    <p class="text-xs text-gray-500 mt-4 mb-1">Nicht dabei?</p>
+    <button type="button" class="btn btn-primary !text-sm !px-4 !py-2" onclick="createFromScan()">＋ Als neuen Artikel anlegen</button>`;
+}
+
+function renderScannedProduct(p) {
+  const image = safeUrl(p.image), n = p.nutrition || {};
+  const facts = [
+    p.quantity,
+    n.energy_kcal != null ? `${decimalText(n.energy_kcal)} kcal pro ${p.nutrition_basis === '100ml' ? '100 ml' : '100 g'}` : '',
+    p.nutriscore ? `Nutri-Score ${p.nutriscore.toUpperCase()}` : '',
+    p.ingredients ? 'mit Zutaten' : '',
+  ].filter(Boolean);
+  const url = safeUrl(p.url);
+  return `<div class="flex gap-3 bg-gray-50 rounded-xl p-3 mb-3">
+    ${image ? `<img src="${esc(image)}" alt="" referrerpolicy="no-referrer" class="w-16 h-16 object-contain shrink-0">` : ''}
+    <div class="min-w-0">
+      ${p.brand ? `<div class="text-[10px] uppercase tracking-wide text-gray-400">${esc(p.brand)}</div>` : ''}
+      <div class="font-semibold text-gray-800">${esc(p.name || 'Ohne Namen')}</div>
+      <div class="text-xs text-gray-500">${facts.map(esc).join(' · ')}</div>
+      <div class="text-[11px] text-gray-400 mt-1">Gefunden bei ${esc(p.source)}${url ? ` · <a class="underline" href="${esc(url)}" ${EXTERNAL}>ansehen</a>` : ''}</div>
+    </div>
+  </div>`;
+}
+
+function renderLinkRow(a) {
+  return `<button type="button" class="w-full text-left flex items-center gap-2 py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50" data-link-key="${esc(a.key)}">
+    <span class="flex-1 min-w-0"><span class="block truncate font-medium text-gray-800">${esc(a.name || a.key)}</span>
+      <span class="block text-[11px] text-gray-400 truncate">${esc([a.brand, ...(a.receipt_names || [])].filter(Boolean).join(' · '))}</span></span>
+    ${a.purchase_count ? `<span class="badge bg-blue-50 text-[#003882] shrink-0">🧾 ${esc(a.purchase_count)}×</span>` : ''}
+  </button>`;
+}
+
+async function searchLinkCandidates(event) {
+  if (event) event.preventDefault();
+  const query = document.getElementById('linkSearch').value.trim();
+  const box = document.getElementById('linkResults');
+  if (!query) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = '<p class="text-xs text-gray-400">Suche…</p>';
+  try {
+    const result = await wsCall('lidl_plus/articles', {query, limit: 15});
+    box.innerHTML = (result.articles || []).length
+      ? result.articles.map(renderLinkRow).join('')
+      : '<p class="text-xs text-gray-400">Kein Artikel gefunden – versuche ein anderes Wort.</p>';
+  } catch (err) {
+    box.innerHTML = `<p class="text-xs text-red-600">${esc(err.message)}</p>`;
+  }
+}
+
+document.getElementById('scanResult').addEventListener('click', event => {
+  const row = event.target.closest('[data-link-key]');
+  if (!row) return;
+  // Several articles with the barcode: open the chosen one, otherwise the barcode is added to it
+  if (lastScan && lastScan.articles.length > 1) {
+    closeScanModal();
+    openArticle(row.dataset.linkKey);
+  } else {
+    linkScan(row.dataset.linkKey);
+  }
+});
+
+// A new article with the barcode and the values of Open Food Facts, saved after checking them
+function createFromScan() {
+  const scan = lastScan;
+  if (!scan) return;
+  closeScanModal();
+  const p = scan.product;
+  if (!p) {
+    newArticle({barcodes: [scan.code]});
+    return;
+  }
+  const sources = {};
+  for (const [field, value] of [['name', p.name], ['brand', p.brand], ['package_size', p.quantity],
+    ['ingredients', p.ingredients], ['image', safeUrl(p.image)]]) {
+    if (value) sources[field] = p.source;
+  }
+  if (Object.keys(p.nutrition || {}).length) sources.nutrition = p.source;
+  newArticle({
+    name: p.name, brand: p.brand, barcodes: [scan.code], package_size: p.quantity, nutrition: p.nutrition,
+    nutrition_basis: p.nutrition_basis, ingredients: p.ingredients, image: safeUrl(p.image), source: p.source, sources,
+  });
+}
+
+// The scanned barcode belongs to an article: saved with the values of Open Food Facts for its empty fields
+async function linkScan(key) {
+  const scan = lastScan;
+  const box = document.getElementById('linkResults');
+  box.innerHTML = '<p class="text-xs text-gray-400">Speichere…</p>';
+  try {
+    const article = await wsCall('lidl_plus/article', {key});
+    const fields = {key, barcodes: [...(article.barcodes || []), scan.code]};
+    const p = scan.product, sources = {}, taken = [];
+    if (p) {
+      if (!article.package_size && p.quantity) { fields.package_size = p.quantity; sources.package_size = p.source; taken.push('Packungsgröße'); }
+      if (!article.has_nutrition && Object.keys(p.nutrition || {}).length) {
+        fields.nutrition = p.nutrition;
+        fields.nutrition_basis = p.nutrition_basis === '100ml' ? '100ml' : '100g';
+        sources.nutrition = p.source;
+        taken.push('Nährwerte');
+      }
+      if (!article.ingredients && p.ingredients) { fields.ingredients = p.ingredients; sources.ingredients = p.source; taken.push('Zutaten'); }
+      if (!article.image && safeUrl(p.image)) { fields.image = safeUrl(p.image); sources.image = p.source; }
+      if (Object.keys(sources).length) fields.sources = sources;
+    }
+    const saved = await wsCall('lidl_plus/article_save', fields);
+    closeScanModal();
+    articleDialogRequest++;
+    renderArticle(saved);
+    document.getElementById('productModal').classList.add('open');
+    document.getElementById('articleFormStatus').textContent = taken.length
+      ? `✓ Barcode zugeordnet, von ${p.source} übernommen: ${taken.join(', ')}`
+      : '✓ Barcode zugeordnet';
+    if (articlesFromServer) loadArticles();
+  } catch (err) {
+    box.innerHTML = `<p class="text-xs text-red-600">${esc(err.message)}</p>`;
+  }
+}
+
+function closeLeafletModal() {
+  leafletRequest++; // a leaflet that is still loading is not shown anymore
+  document.getElementById('leafletModal').classList.remove('open');
+}
+
+// A click on the dark background closes the dialog
+function closeModal(e) {
+  if (e.target.id === 'productModal') closeProductModal();
+  else if (e.target.id === 'leafletModal') closeLeafletModal();
+  else if (e.target.id === 'scanModal') closeScanModal();
+  else if (e.target.id === 'pickModal') closePickModal();
+}
+
+// Escape closes the dialog on top
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const open = id => document.getElementById(id).classList.contains('open');
+  if (open('scanModal')) closeScanModal();
+  else if (open('pickModal')) closePickModal();
+  else if (open('productModal')) closeProductModal();
+  else closeLeafletModal();
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ANGEBOTE
+// ══════════════════════════════════════════════════════════════════════════════
+function renderOfferStores() {
+  const names = new Map((appData.stores || []).map(s => [s.id, s.name]));
+  const stores = (appData.offer_stores || []).map(key => names.get(key) ? `${names.get(key)} (${key})` : key);
+  document.getElementById('offerStores').textContent = stores.length
+    ? `Angebote der Lidl Plus App für: ${stores.join(', ')} · Filialen ändern: Einstellungen → Geräte & Dienste → Lidl Plus → Konfigurieren`
+    : 'Noch keine Filiale bekannt. Wähle eine unter Einstellungen → Geräte & Dienste → Lidl Plus → Konfigurieren.';
+}
+
+function filterOffers() {
+  const q      = document.getElementById('offerSearch').value.toLowerCase().trim();
+  const status = document.getElementById('offerStatus').value;
+  const bought = document.getElementById('offerBought').checked;
+  const offers = allOffers.filter(o => {
+    if (status && o.status !== status) return false;
+    if (bought && !(o.bought_products || []).length) return false;
+    if (q && !`${o.brand||''} ${o.title||''}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  document.getElementById('offerCount').textContent = `${offers.length} von ${allOffers.length} Angeboten`;
+
+  const grid = document.getElementById('offerGrid');
+  if (!offers.length) {
+    grid.className = 'text-center py-16 text-gray-400';
+    grid.textContent = allOffers.length ? 'Keine Angebote gefunden.' : 'Keine Angebote geladen.';
+    return;
+  }
+  grid.className = 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3';
+  grid.innerHTML = offers.map(renderOfferCard).join('');
+}
+
+// Most titles start with the brand already
+function offerName(o) {
+  const brand = o.brand || '', title = o.title || '';
+  return title.toLowerCase().startsWith(brand.toLowerCase()) ? title : `${brand} ${title}`;
+}
+
+function renderOfferCard(o) {
+  const image = safeUrl(o.image);
+  const bought = (o.bought_products || []).map(p => p.name).filter(Boolean);
+  const unitInfo = [o.packaging, o.price_per_unit].filter(Boolean).map(esc).join(' · ');
+  return `<div class="bg-white rounded-2xl shadow-sm overflow-hidden flex flex-col cursor-pointer hover:shadow-md transition-shadow"
+    data-offer-id="${esc(o.id)}" data-article-key="${esc(o.article_key || '')}">
+    ${image ? `<div class="h-32 flex items-center justify-center p-2 bg-white">
+      <img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="max-h-full max-w-full object-contain"></div>` : ''}
+    <div class="p-3.5 pt-2 flex-1 flex flex-col">
+      <div class="text-[10px] uppercase tracking-wide text-gray-400 truncate">${esc(o.brand)}</div>
+      <div class="font-semibold text-gray-800 leading-tight line-clamp-2">${esc(o.title)}</div>
+      ${unitInfo ? `<div class="text-[11px] text-gray-400 mt-1">${unitInfo}</div>` : ''}
+      <div class="mt-auto pt-2 flex items-end gap-2 flex-wrap">
+        <span class="text-lg font-bold text-[#003882] leading-none">${o.price != null ? fmt(o.price) : esc(o.price_text)}</span>
+        ${o.regular_price ? `<span class="text-xs text-gray-400 line-through">${fmt(o.regular_price)}</span>` : ''}
+        ${o.discount ? `<span class="badge bg-red-100 text-red-600 ml-auto">${esc(o.discount)}</span>` : ''}
+      </div>
+      <div class="mt-2">${validity(o)}</div>
+      ${bought.length ? `<div class="mt-2 text-[11px] bg-blue-50 text-[#003882] rounded-lg px-2 py-1">✓ Schon gekauft: ${esc(bought.join(', '))}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+document.getElementById('offerGrid').addEventListener('click', event => {
+  const card = event.target.closest('[data-article-key]');
+  if (card && card.dataset.articleKey) openArticle(card.dataset.articleKey);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROSPEKTE UND SUCHE
+// ══════════════════════════════════════════════════════════════════════════════
+function renderLeaflets() {
+  // The weekly leaflets differ between the offer regions of Lidl
+  const region = appData.leaflet_region;
+  document.getElementById('leafletRegion').textContent = region
+    ? `Prospekte der Angebotsregion ${region.name || region.region} (Filiale ${region.store}). Die Filiale änderst du unter Einstellungen → Geräte & Dienste → Lidl Plus → Konfigurieren.`
+    : 'Bundesweite Prospekte: Die Angebotsregion deiner Filiale ist nicht bekannt, regionale Angebote können abweichen.';
+  const grid = document.getElementById('leafletGrid');
+  if (!allLeaflets.length) {
+    grid.className = 'text-center py-16 text-gray-400';
+    grid.textContent = 'Keine Prospekte geladen.';
+    return;
+  }
+  grid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3';
+  grid.innerHTML = allLeaflets.map(l => {
+    const thumbnail = safeUrl(l.thumbnail), pdf = safeUrl(l.pdf), url = safeUrl(l.url);
+    return `<div class="bg-white rounded-2xl shadow-sm overflow-hidden flex">
+      ${thumbnail ? `<img src="${esc(thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer"
+           class="w-28 shrink-0 object-cover object-top bg-gray-50 cursor-pointer" data-leaflet-id="${esc(l.id)}">` : ''}
+      <div class="p-3.5 flex-1 min-w-0 flex flex-col">
+        <div class="text-[10px] uppercase tracking-wide text-gray-400 truncate">${esc(l.category)}</div>
+        <div class="font-semibold text-gray-800 leading-tight">${esc(l.name)}</div>
+        <div class="text-xs text-gray-500 mt-0.5">${esc(l.title)}</div>
+        <div class="mt-2">${validity(l)}</div>
+        <div class="text-xs text-gray-400 mt-1.5">${esc(l.page_count || 0)} Seiten · ${esc(l.product_count || 0)} Produkte</div>
+        <div class="mt-auto pt-2.5 flex flex-wrap gap-1.5">
+          <button class="btn btn-primary" data-leaflet-id="${esc(l.id)}">Ansehen</button>
+          ${pdf ? `<a class="btn" href="${esc(pdf)}" ${EXTERNAL}>PDF</a>` : ''}
+          ${url ? `<a class="btn" href="${esc(url)}" ${EXTERNAL}>Online</a>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+document.getElementById('leafletGrid').addEventListener('click', event => {
+  const element = event.target.closest('[data-leaflet-id]');
+  if (element) openLeaflet(element.dataset.leafletId);
+});
+
+// Pages and products are loaded when a leaflet is opened
+async function openLeaflet(id) {
+  const summary = allLeaflets.find(l => l.id === id) || {};
+  document.getElementById('leafletTitle').textContent = [summary.name, summary.title].filter(Boolean).join(' · ') || 'Prospekt';
+  const body = document.getElementById('leafletBody');
+  body.innerHTML = '<p class="text-center py-10 text-gray-400">Lade Prospekt…</p>';
+  document.getElementById('leafletModal').classList.add('open');
+  const request = ++leafletRequest;
+  try {
+    const leaflet = await wsCall('lidl_plus/leaflet', {leaflet_id: id});
+    if (request !== leafletRequest) return; // closed or another leaflet opened meanwhile
+    currentLeaflet = leaflet;
+    document.getElementById('leafletTitle').textContent = [leaflet.name, leaflet.title].filter(Boolean).join(' · ') || 'Prospekt';
+    body.innerHTML = renderLeafletDetails(leaflet);
+  } catch (err) {
+    if (request !== leafletRequest) return;
+    body.innerHTML = `<p class="text-center py-10 text-red-600">${esc('Prospekt konnte nicht geladen werden: ' + err.message)}</p>`;
+  }
+}
+
+function renderLeafletDetails(l) {
+  const pages = l.pages || [], products = l.products || [], offers = l.offers || [], articles = l.articles || [];
+  const pdf = safeUrl(l.pdf), url = safeUrl(l.url);
+  return `
+    <p id="leafletStatus" class="text-xs text-green-700 mb-2 empty:hidden"></p>
+    <div class="flex flex-wrap items-center gap-2 mb-4">
+      ${validity(l)}
+      ${pdf ? `<a class="btn" href="${esc(pdf)}" ${EXTERNAL}>📄 PDF</a>` : ''}
+      ${url ? `<a class="btn" href="${esc(url)}" ${EXTERNAL}>🌐 Online ansehen</a>` : ''}
+    </div>
+    ${offers.length ? `<h3 class="section-title">Angebote der Lidl Plus App in diesem Prospekt (${offers.length})</h3>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-5">${offers.map(renderLeafletOffer).join('')}</div>` : ''}
+    ${articles.length ? `<h3 class="section-title">Aus deiner Artikeldatenbank (${articles.length})</h3>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-5">${articles.map(renderLeafletArticle).join('')}</div>` : ''}
+    ${!offers.length && !products.length ? `<p class="text-xs text-gray-500 mb-4">Zu diesem Prospekt liefert Lidl keine Produktdaten, die Artikel stehen nur auf den Seiten.</p>` : ''}
+    ${products.length ? `<h3 class="section-title">Produkte des Onlineshops (${products.length})</h3>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 mb-5">${products.map(renderLeafletProduct).join('')}</div>` : ''}
+    ${pages.length ? `<h3 class="section-title">Seiten (${pages.length})</h3>
+      <p class="text-xs text-gray-500 mb-2">Siehst du einen Artikel auf einer Seite? Mit „＋ Artikel“ darunter ergänzt du ihn aus deiner Artikeldatenbank oder legst ihn neu an.</p>
+      <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">${pages.map(page => renderPage(page, true)).join('')}</div>`
+      : '<p class="text-center py-6 text-gray-400">Für diesen Prospekt sind keine Seiten gespeichert.</p>'}`;
+}
+
+// A page of a leaflet; in the leaflet dialog with a button to add an article of the page
+function renderPage(page, assign = false) {
+  const image = safeUrl(page.image), preview = safeUrl(page.thumbnail) || image;
+  const label = `<div class="text-[11px] text-gray-400 text-center mt-0.5">Seite ${esc(page.number)}</div>`;
+  const button = assign
+    ? `<button type="button" class="btn !text-[11px] !px-2 !py-0.5 w-full justify-center mt-1" data-assign-page="${esc(page.number)}">＋ Artikel</button>`
+    : '';
+  if (!image) return `<div>${label}${button}</div>`;
+  return `<div><a href="${esc(image)}" ${EXTERNAL} title="${esc(page.description)}" class="block">
+    <img src="${esc(preview)}" alt="${esc(page.description)}" loading="lazy" referrerpolicy="no-referrer"
+         class="w-full rounded-lg border border-gray-100 bg-gray-50">${label}</a>${button}</div>`;
+}
+
+// A product of the online shop, it opens its article (with the link to the online shop)
+function renderLeafletProduct(p) {
+  const image = safeUrl(p.image);
+  const pages = (p.pages || []).map(esc).join(', ');
+  return `<div class="bg-gray-50 rounded-xl p-2 hover:bg-gray-100 cursor-pointer" data-article-key="web:${esc(p.id)}">
+    ${image ? `<img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="h-24 w-full object-contain mb-1.5">` : ''}
+    <div class="text-[10px] uppercase text-gray-400 truncate">${esc(p.brand)}</div>
+    <div class="text-xs font-semibold text-gray-800 line-clamp-2">${esc(p.title)}</div>
+    <div class="flex items-baseline justify-between mt-1">
+      <span class="text-sm font-bold text-[#003882]">${p.price != null ? fmt(p.price) : ''}</span>
+      ${pages ? `<span class="text-[10px] text-gray-400">S. ${pages}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+// An offer of the Lidl Plus app found on the pages of a leaflet
+function renderLeafletOffer(o) {
+  const image = safeUrl(o.image);
+  const pages = (o.pages || []).map(esc).join(', ');
+  return `<div class="bg-gray-50 rounded-xl p-2 hover:bg-gray-100 cursor-pointer" data-article-key="${esc(o.article_key || '')}">
+    ${image ? `<img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="h-24 w-full object-contain mb-1.5">` : ''}
+    <div class="text-xs font-semibold text-gray-800 line-clamp-2">${esc(offerName(o))}</div>
+    ${o.packaging ? `<div class="text-[10px] text-gray-400 line-clamp-2">${esc(o.packaging)}</div>` : ''}
+    <div class="flex items-baseline justify-between mt-1">
+      <span class="text-sm font-bold text-[#003882]">${o.price != null ? fmt(o.price) : esc(o.price_text)}</span>
+      ${pages ? `<span class="text-[10px] text-gray-400">S. ${pages}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+// An article of the database on the pages of a leaflet: added by hand or found by its name
+function renderLeafletArticle(a) {
+  const image = safeUrl(a.image);
+  const pages = (a.pages || []).map(esc).join(', ');
+  return `<div class="bg-gray-50 rounded-xl p-2 hover:bg-gray-100 cursor-pointer" data-article-key="${esc(a.key)}">
+    ${image ? `<img src="${esc(image)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="h-24 w-full object-contain mb-1.5">` : ''}
+    ${a.brand ? `<div class="text-[10px] uppercase text-gray-400 truncate">${esc(a.brand)}</div>` : ''}
+    <div class="text-xs font-semibold text-gray-800 line-clamp-2">${esc(a.name || a.key)}</div>
+    <div class="flex items-baseline justify-between gap-1 mt-1">
+      <span class="text-[10px] ${a.added ? 'text-[#003882]' : 'text-gray-400'}">${a.added ? 'von dir ergänzt' : 'am Namen erkannt'}</span>
+      ${pages ? `<span class="text-[10px] text-gray-400">S. ${pages}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+document.getElementById('leafletBody').addEventListener('click', event => {
+  const assign = event.target.closest('[data-assign-page]');
+  if (assign) return openPicker(+assign.dataset.assignPage);
+  const card = event.target.closest('[data-article-key]');
+  if (card && card.dataset.articleKey) openArticle(card.dataset.articleKey);
+});
+
+// Loads the leaflet of the dialog again, e.g. after an article was added to a page
+async function reloadLeaflet(message) {
+  if (!currentLeaflet || !document.getElementById('leafletModal').classList.contains('open')) return;
+  const request = ++leafletRequest;
+  try {
+    const leaflet = await wsCall('lidl_plus/leaflet', {leaflet_id: currentLeaflet.id});
+    if (request !== leafletRequest) return;
+    currentLeaflet = leaflet;
+    document.getElementById('leafletBody').innerHTML = renderLeafletDetails(leaflet);
+    if (message) document.getElementById('leafletStatus').textContent = message;
+  } catch (err) {
+    if (request === leafletRequest) document.getElementById('leafletStatus').textContent = '⚠️ ' + err.message;
+  }
+}
+
+// ── Artikel einer Prospektseite zuordnen ──────────────────────────────────────
+let currentLeaflet = null, pickPage = null, pickRequest = 0;
+
+function openPicker(page) {
+  if (!currentLeaflet) return;
+  pickPage = page;
+  pickRequest++;
+  document.getElementById('pickTitle').textContent = `Artikel auf Seite ${page}`;
+  document.getElementById('pickInfo').textContent =
+    `${[currentLeaflet.name, currentLeaflet.title].filter(Boolean).join(' · ')}: Welcher Artikel ist auf dieser Seite? Suche ihn in deiner Artikeldatenbank.`;
+  document.getElementById('pickSearch').value = '';
+  document.getElementById('pickResults').innerHTML = '';
+  document.getElementById('pickStatus').textContent = '';
+  document.getElementById('pickModal').classList.add('open');
+  document.getElementById('pickSearch').focus();
+}
+
+function closePickModal() {
+  pickRequest++;
+  document.getElementById('pickModal').classList.remove('open');
+}
+
+async function searchPick(event) {
+  if (event) event.preventDefault();
+  const query = document.getElementById('pickSearch').value.trim();
+  const box = document.getElementById('pickResults');
+  if (!query) {
+    box.innerHTML = '';
+    return;
+  }
+  const request = ++pickRequest;
+  box.innerHTML = '<p class="text-xs text-gray-400">Suche…</p>';
+  try {
+    const result = await wsCall('lidl_plus/articles', {query, limit: 15});
+    if (request !== pickRequest) return;
+    box.innerHTML = (result.articles || []).length
+      ? result.articles.map(renderLinkRow).join('')
+      : '<p class="text-xs text-gray-400">Kein Artikel gefunden – lege ihn unten neu an.</p>';
+  } catch (err) {
+    if (request === pickRequest) box.innerHTML = `<p class="text-xs text-red-600">${esc(err.message)}</p>`;
+  }
+}
+
+document.getElementById('pickResults').addEventListener('click', event => {
+  const row = event.target.closest('[data-link-key]');
+  if (row) assignToPage(row.dataset.linkKey);
+});
+
+async function assignToPage(key) {
+  const status = document.getElementById('pickStatus');
+  const page = pickPage;
+  status.textContent = 'Speichere…';
+  try {
+    const article = await wsCall('lidl_plus/article_leaflet', {key, leaflet_id: currentLeaflet.id, page});
+    closePickModal();
+    await reloadLeaflet(`✓ ${article.name || key} auf Seite ${page} ergänzt`);
+  } catch (err) {
+    status.textContent = '⚠️ ' + err.message;
+  }
+}
+
+// A new article of the page, named like the search; it is added to the page when it is saved
+function createFromPick() {
+  const name = document.getElementById('pickSearch').value.trim();
+  const leaflet = {leaflet_id: currentLeaflet.id, page: pickPage};
+  closePickModal();
+  newArticle({name, leaflet});
+}
+
+// Search in the articles bought before, the offers and the pages and products of the leaflets
+async function searchAll(event) {
+  if (event) event.preventDefault();
+  const query = document.getElementById('globalSearch').value.trim();
+  const box = document.getElementById('searchResults');
+  if (!query) {
+    clearSearch();
+    return;
+  }
+  box.classList.remove('hidden');
+  box.innerHTML = '<p class="text-gray-400 py-2">Suche…</p>';
+  const request = ++searchRequest;
+  try {
+    const result = await wsCall('lidl_plus/search', {query});
+    if (request === searchRequest) box.innerHTML = renderSearchResults(result || {}, query);
+  } catch (err) {
+    if (request === searchRequest) box.innerHTML = `<p class="text-red-600 py-2">${esc('Suche fehlgeschlagen: ' + err.message)}</p>`;
+  }
+}
+
+function clearSearch() {
+  searchRequest++;
+  const box = document.getElementById('searchResults');
+  box.classList.add('hidden');
+  box.innerHTML = '';
+}
+
+function renderSearchResults(result, query) {
+  const products = result.products || [], offers = result.offers || [], leaflets = result.leaflets || [];
+  if (!products.length && !offers.length && !leaflets.length) {
+    return `<p class="text-gray-400 py-2">Nichts gefunden für „${esc(query)}“.</p>`;
+  }
+  const section = (title, content) => `<h3 class="section-title mt-3">${title}</h3>${content}`;
+  let html = '';
+  if (offers.length) {
+    html += section('🏷️ Angebote deiner Filialen', offers.map(o => `
+      <div class="flex items-center gap-3 py-1.5 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50" data-article-key="${esc(o.article_key || '')}">
+        <span class="flex-1 min-w-0 truncate">${esc(offerName(o))}</span>
+        <span class="shrink-0 font-semibold text-[#003882]">${o.price != null ? fmt(o.price) : esc(o.price_text)}</span>
+        <span class="shrink-0">${validity(o)}</span>
+      </div>`).join(''));
+  }
+  if (products.length) {
+    html += section('🧾 In deinen Einkäufen', products.map(p => `
+      <div class="flex items-center gap-3 py-1.5 border-b border-gray-50 last:border-0 cursor-pointer hover:bg-gray-50" data-article-key="nr:${esc(p.id)}">
+        <span class="flex-1 min-w-0 truncate">${esc(p.name)}</span>
+        <span class="shrink-0 text-xs text-gray-400">${esc(p.purchase_count)}× · zuletzt ${fmtDate(p.last_date)}</span>
+        <span class="shrink-0 font-semibold">${fmt(p.last_price)}</span>
+      </div>`).join(''));
+  }
+  if (leaflets.length) {
+    html += section('📰 In Prospekten', leaflets.map(entry => {
+      const l = entry.leaflet || {};
+      const pages = entry.pages || [], products = entry.products || [];
+      return `<div class="border border-gray-100 rounded-xl p-3 mb-2">
+        <div class="flex flex-wrap items-center gap-2 mb-2">
+          <button class="font-semibold text-[#003882] hover:underline text-left" data-leaflet-id="${esc(l.id)}">${esc([l.name, l.title].filter(Boolean).join(' · '))}</button>
+          ${validity(l)}
+        </div>
+        ${pages.length ? `<div class="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2 mb-2">${pages.map(page => renderPage(page)).join('')}</div>` : ''}
+        ${products.length ? `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">${products.map(renderLeafletProduct).join('')}</div>` : ''}
+      </div>`;
+    }).join(''));
+  }
+  return html;
+}
+
+document.getElementById('searchResults').addEventListener('click', event => {
+  const leaflet = event.target.closest('button[data-leaflet-id]');
+  if (leaflet) return openLeaflet(leaflet.dataset.leafletId);
+  const article = event.target.closest('[data-article-key]');
+  if (article && article.dataset.articleKey) openArticle(article.dataset.articleKey);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STOSSZEITEN
+// ══════════════════════════════════════════════════════════════════════════════
+const DAY_NAMES = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+const DAY_WORDS = ['montags', 'dienstags', 'mittwochs', 'donnerstags', 'freitags', 'samstags', 'sonntags'];
+const DAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+let busyDay = null, chartBusy = null;
+const weekdayOf = date => (date.getDay() + 6) % 7; // Monday = 0
+const hourOf = text => {
+  const m = /(\d{2}):(\d{2})/.exec(String(text ?? ''));
+  return m ? +m[1] + (+m[2] > 0 ? 1 : 0) : null; // a range until 21:30 includes the hour 21
+};
+const timeText = value => (/(\d{2}:\d{2})/.exec(String(value ?? '')) || [])[1] || String(value ?? '');
+const startHourOf = text => {
+  const m = /(\d{2}):\d{2}/.exec(String(text ?? ''));
+  return m ? +m[1] : null;
+};
+
+// Opening hours of a weekday of this week, special days (holidays) included; null if unknown
+function busyRanges(day) {
+  const opening = (appData.busy_times || {}).opening_hours;
+  if (!opening) return null;
+  const date = new Date();
+  date.setDate(date.getDate() + ((day - weekdayOf(date) + 7) % 7));
+  const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const special = (opening.special || {})[key];
+  return special !== undefined ? special : (opening[DAY_KEYS[day]] || []);
+}
+
+function busyLabel(value) {
+  if (value < 25) return 'kaum besucht';
+  if (value < 50) return 'mäßig besucht';
+  if (value < 75) return 'ziemlich voll';
+  return 'sehr voll';
+}
+
+function renderBusy() {
+  renderDuration();
+  const busy = appData.busy_times;
+  const storeTitle = document.getElementById('busyStore');
+  const now = new Date(), today = weekdayOf(now);
+  if (busyDay === null) busyDay = today;
+  if (chartBusy) { chartBusy.destroy(); chartBusy = null; }
+  if (!busy || !busy.store) {
+    storeTitle.textContent = 'Stoßzeiten';
+    document.getElementById('busyOpening').textContent = 'Keine Filiale bekannt: wähle eine unter Einstellungen → Geräte & Dienste → Lidl Plus → Konfigurieren.';
+    ['busyDays', 'busySummary', 'busySource'].forEach(id => { document.getElementById(id).innerHTML = ''; });
+    document.getElementById('busyChartWrapper').style.display = 'none';
+    document.getElementById('busyNow').classList.add('hidden');
+    return;
+  }
+  const store = busy.store;
+  storeTitle.textContent = `Lidl ${store.name || ''}`.trim();
+  const ranges = busyRanges(busyDay);
+  const opening = document.getElementById('busyOpening');
+  const address = [store.address, [store.postal_code, store.locality].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const hoursText = ranges === null ? 'Öffnungszeiten unbekannt'
+    : ranges.length ? ranges.map(r => `${timeText(r[0])}–${timeText(r[1])} Uhr`).join(', ')
+    : 'geschlossen';
+  opening.textContent = `${address} · ${busyDay === today ? 'heute' : DAY_NAMES[busyDay]}: ${hoursText}`;
+
+  document.getElementById('busyDays').innerHTML = DAY_NAMES.map((name, day) => `
+    <button class="btn ${day === busyDay ? 'btn-primary' : ''}" data-busy-day="${day}">${name}</button>`).join('');
+
+  // Hours shown: the opening hours of the day, 6 to 22 o'clock if they are unknown
+  let first = 6, last = 22;
+  if (ranges && ranges.length) {
+    first = Math.min(...ranges.map(r => startHourOf(r[0])));
+    last = Math.max(...ranges.map(r => hourOf(r[1])));
+  }
+  const closed = ranges !== null && ranges.length === 0;
+  const hours = [];
+  for (let hour = first; hour < last; hour++) hours.push(hour);
+  const forecast = busy.forecast ? busy.forecast.hours[busyDay] : null;
+  const own = busy.own ? busy.own.hours[busyDay] : new Array(24).fill(0);
+
+  const badge = document.getElementById('busyNow');
+  const todayRanges = busyRanges(today);
+  const openNow = todayRanges === null || todayRanges.some(r => startHourOf(r[0]) <= now.getHours() && now.getHours() < hourOf(r[1]));
+  if (!openNow) {
+    badge.className = 'badge bg-gray-100 text-gray-500';
+    badge.textContent = 'Jetzt geschlossen';
+  } else if (busy.forecast && busy.forecast.hours[today][now.getHours()] != null) {
+    const value = busy.forecast.hours[today][now.getHours()];
+    badge.className = `badge ${value >= 75 ? 'bg-red-100 text-red-600' : value >= 50 ? 'badge-upcoming' : 'badge-current'}`;
+    badge.textContent = `Jetzt: ${value} % – ${busyLabel(value)}`;
+  } else {
+    badge.className = 'badge hidden';
+  }
+
+  const wrapper = document.getElementById('busyChartWrapper');
+  const closedText = document.getElementById('busyClosed');
+  closedText.classList.toggle('hidden', !closed);
+  closedText.textContent = closed ? `${busyDay === today ? 'Heute' : DAY_NAMES[busyDay]} geschlossen` : '';
+  wrapper.style.display = closed ? 'none' : 'block';
+  if (!closed) {
+    const current = hour => busyDay === today && hour === now.getHours();
+    const datasets = forecast ? [
+      {label: 'Erwartete Auslastung (%)', data: hours.map(h => forecast[h]), yAxisID: 'y',
+       backgroundColor: hours.map(h => current(h) ? '#e35d4f' : 'rgba(0,56,130,0.55)'), borderRadius: 4, order: 2},
+      {type: 'line', label: 'Deine Einkäufe', data: hours.map(h => own[h]), yAxisID: 'y2',
+       borderColor: '#f59e0b', backgroundColor: '#f59e0b', pointRadius: 3, tension: 0, order: 1},
+    ] : [
+      {label: 'Deine Einkäufe', data: hours.map(h => own[h]), yAxisID: 'y',
+       backgroundColor: hours.map(h => current(h) ? '#e35d4f' : 'rgba(0,56,130,0.55)'), borderRadius: 4},
+    ];
+    const scales = {
+      x: {grid: {display: false}},
+      y: {beginAtZero: true, grid: {color: '#f3f4f6'}, ...(forecast ? {max: 100, ticks: {callback: v => v + ' %'}} : {ticks: {precision: 0}})},
+    };
+    if (forecast) scales.y2 = {beginAtZero: true, position: 'right', grid: {display: false}, ticks: {precision: 0}};
+    chartBusy = new Chart(document.getElementById('chartBusy'), {
+      type: 'bar',
+      data: {labels: hours.map(h => `${h} Uhr`), datasets},
+      options: {responsive: true, maintainAspectRatio: false, scales,
+        plugins: {legend: {display: Boolean(forecast), position: 'bottom'}}},
+    });
+  }
+
+  // Quietest and busiest hour of the day, and when the user shops most often
+  const summary = [];
+  if (forecast && !closed) {
+    const open = hours.filter(h => forecast[h] != null);
+    if (open.length) {
+      const quiet = open.reduce((a, b) => forecast[b] < forecast[a] ? b : a);
+      const full = open.reduce((a, b) => forecast[b] > forecast[a] ? b : a);
+      summary.push(`Am ruhigsten um ${quiet} Uhr (${forecast[quiet]} %), am vollsten um ${full} Uhr (${forecast[full]} %).`);
+    }
+  }
+  const counts = busy.own ? busy.own.hours : [];
+  let best = null;
+  counts.forEach((row, day) => row.forEach((count, hour) => { if (count && (!best || count > best.count)) best = {day, hour, count}; }));
+  summary.push(best
+    ? `Du kaufst hier meist ${DAY_WORDS[best.day]} um ${best.hour} Uhr ein (${best.count} von ${busy.own.receipts} Kassenbons).`
+    : 'Aus dieser Filiale gibt es noch keine Kassenbons.');
+  document.getElementById('busySummary').textContent = summary.join(' ');
+
+  const source = document.getElementById('busySource');
+  if (busy.forecast) {
+    source.textContent = `Stoßzeiten: Prognose von BestTime.app (Stand ${fmtDate(busy.forecast.updated)}).`
+      + (busy.forecast_error ? ` Aktualisierung fehlgeschlagen: ${busy.forecast_error}` : '');
+  } else {
+    source.textContent = busy.forecast_error
+      ? `BestTime.app: ${busy.forecast_error}`
+      : 'Für echte Stoßzeiten: ein Konto bei besttime.app anlegen und den privaten API-Schlüssel unter Einstellungen → Geräte & Dienste → Lidl Plus → Konfigurieren eintragen. Bis dahin siehst du, wann du selbst hier einkaufst.';
+  }
+}
+
+// ── Einkaufsdauer ─────────────────────────────────────────────────────────────
+const clockTime = s => {
+  const d = new Date(s);
+  return isNaN(d) ? '?' : d.toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'});
+};
+const minutesText = m => m == null ? '–' : `${fmtNum(m, Number.isInteger(m) ? 0 : 1)} Min.`;
+const durationHint = html => `<div class="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">${html}</div>`;
+
+// Arrival, departure and duration of the visit of the store of a receipt
+function visitText(v) {
+  if (!v) return '';
+  if (v.status === 'ok') {
+    const checkout = v.checkout_minutes != null ? `, bis zur Kasse ${v.checkout_minutes} Min.` : '';
+    return `${clockTime(v.arrived)}–${clockTime(v.left)} Uhr (${v.minutes} Min.${checkout})`;
+  }
+  if (v.status === 'incomplete') {
+    return v.arrived ? `ab ${clockTime(v.arrived)} Uhr, das Ende wurde nicht erkannt` : `bis ${clockTime(v.left)} Uhr, die Ankunft wurde nicht erkannt`;
+  }
+  if (v.status === 'not_seen') return 'Das Handy hat während des Einkaufs keinen Standort am Markt gemeldet';
+  return 'Kein Standort aus dieser Zeit';
+}
+
+function renderDuration() {
+  const box = document.getElementById('durationBody');
+  const d = appData.shopping_duration;
+  if (!d) {
+    box.textContent = 'Noch keine Daten – die Einkaufsdauer wird bei der nächsten Aktualisierung berechnet.';
+    return;
+  }
+  const parts = [];
+  if (d.visits) {
+    const checkout = d.average_checkout_minutes != null ? `, bis zur Kasse Ø ${minutesText(d.average_checkout_minutes)}` : '';
+    parts.push(`<p>Ø <strong>${minutesText(d.average_minutes)}</strong> im Markt${checkout} (${esc(d.visits)} Einkäufe gemessen)</p>`);
+    parts.push(`<p class="text-xs text-gray-500 mt-1">Kürzester Einkauf ${minutesText(d.shortest_minutes)}, längster ${minutesText(d.longest_minutes)}</p>`);
+    const days = (d.by_weekday || []).map((m, day) => m == null ? '' : `${DAY_NAMES[day]} ${minutesText(m)}`).filter(Boolean);
+    if (days.length > 1) parts.push(`<p class="text-xs text-gray-500 mt-1">Nach Wochentag: ${days.join(' · ')}</p>`);
+    if (d.last) {
+      parts.push(`<p class="text-xs text-gray-500 mt-1">Zuletzt: ${fmtDay(d.last.date)} in ${esc(d.last.store)}, ${esc(visitText({...d.last, status: 'ok'}))}</p>`);
+    }
+  } else {
+    parts.push('<p>Noch kein Einkauf gemessen.</p>');
+  }
+  const store = d.store;
+  if (store && store.zone_created) {
+    parts.push(`<p class="text-xs text-green-700 mt-2">✓ Die Zone „${esc(store.zones[0])}“ wurde angelegt. Die Home-Assistant-App übernimmt sie beim nächsten Standort-Update.</p>`);
+  } else if (!(d.entities || []).length) {
+    parts.push(durationHint('Wähle unter Einstellungen → Geräte &amp; Dienste → Lidl Plus → Konfigurieren die Personen, deren Handy-Standort (Home-Assistant-App) die Einkaufsdauer zeigt.'));
+  } else if (store && !(store.zones || []).length) {
+    parts.push(durationHint(`<p>Damit die Home-Assistant-App gleich meldet, wann du ankommst und wieder gehst, braucht die Filiale eine eigene Zone.
+      Ohne Zone schickt das Handy bei kurzen Einkäufen oft gar keinen Standort.</p>
+      <button type="button" class="btn btn-primary mt-2" id="createZone">📍 Zone „Lidl ${esc(store.name)}“ anlegen</button>
+      <p id="zoneStatus" class="mt-1"></p>`));
+  } else if (store && !d.visits) {
+    parts.push(`<p class="text-xs text-gray-500 mt-2">✓ Die Zone „${esc(store.zones[0])}“ ist eingerichtet. Die Dauer erscheint nach dem nächsten Einkauf,
+      wenn die App den Standort im Hintergrund senden darf.</p>`);
+  }
+  parts.push(`<p class="text-[11px] text-gray-400 mt-3">Gemessen mit dem Standort der Home-Assistant-App: vom ersten Standort am Markt bis zum ersten danach.
+    Home Assistant behält Standorte nur wenige Tage, deshalb werden neue Einkäufe gemessen.</p>`);
+  box.innerHTML = parts.join('');
+}
+
+document.getElementById('durationBody').addEventListener('click', event => {
+  const button = event.target.closest('#createZone');
+  if (button) createStoreZone(button);
+});
+
+// A zone around the store: the app reports entering and leaving it right away (Home Assistant allows this to administrators)
+async function createStoreZone(button) {
+  const store = (appData.shopping_duration || {}).store;
+  if (!store) return;
+  const status = document.getElementById('zoneStatus');
+  const name = `Lidl ${store.name}`;
+  button.disabled = true;
+  status.textContent = 'Lege die Zone an…';
+  try {
+    await postCall({type: 'lidl-plus:call', request: {
+      type: 'zone/create', name, latitude: store.latitude, longitude: store.longitude, radius: 100, icon: 'mdi:cart', passive: false,
+    }});
+    store.zones = [name];
+    store.zone_created = true;
+    renderDuration();
+  } catch (err) {
+    button.disabled = false;
+    status.textContent = `Das hat nicht geklappt (${err.message}). Lege die Zone selbst an: Einstellungen → Bereiche, Labels & Zonen → Zonen, Radius etwa 100 m.`;
+  }
+}
+
+document.getElementById('busyDays').addEventListener('click', event => {
+  const button = event.target.closest('[data-busy-day]');
+  if (!button) return;
+  busyDay = +button.dataset.busyDay;
+  renderBusy();
+});
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+if (window.parent === window) {
+  showError('Diese Seite funktioniert nur als Home-Assistant-Panel (Seitenleiste → Lidl Plus).');
+} else {
+  requestData();
+  setInterval(requestData, REFRESH_INTERVAL_MS);
+}
+</script>
+</body>
+</html>

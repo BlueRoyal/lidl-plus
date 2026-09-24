@@ -4,32 +4,99 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, CONF_REFRESH_TOKEN
+from .const import (
+    CONF_REFRESH_TOKEN,
+    KEY_AVERAGE_BASKET,
+    KEY_BUSY_TIMES,
+    KEY_CATALOG,
+    KEY_CATEGORY_FOOD_SPENDING,
+    KEY_CATEGORY_NONFOOD_SPENDING,
+    KEY_COUPONS,
+    KEY_COUPONS_ACTIVATED,
+    KEY_COUPONS_AVAILABLE,
+    KEY_CURRENT_MONTH_SPENDING,
+    KEY_LAST_ERROR,
+    KEY_LAST_SYNC,
+    KEY_LEAFLET_REGION,
+    KEY_LEAFLETS,
+    KEY_LOG,
+    KEY_NEW_TICKETS_LAST_SYNC,
+    KEY_OFFER_STORES,
+    KEY_OFFERS,
+    KEY_PRODUCTS,
+    KEY_RECEIPTS,
+    KEY_SHOPPING_DURATION,
+    KEY_SHOPPING_FREQUENCY,
+    KEY_SPENDING_BY_STORE,
+    KEY_TOTAL_TICKETS,
+)
+from .coordinator import LidlPlusConfigEntry
+
+# Diagnostics are meant to be attached to public issues, so leave out personal data
+TO_REDACT = {CONF_REFRESH_TOKEN}
+_SUMMARY_KEYS = (
+    KEY_TOTAL_TICKETS,
+    KEY_NEW_TICKETS_LAST_SYNC,
+    KEY_LAST_SYNC,
+    KEY_LAST_ERROR,
+    KEY_CURRENT_MONTH_SPENDING,
+    KEY_AVERAGE_BASKET,
+    KEY_SHOPPING_FREQUENCY,
+    KEY_CATEGORY_FOOD_SPENDING,
+    KEY_CATEGORY_NONFOOD_SPENDING,
+    KEY_COUPONS_AVAILABLE,
+    KEY_COUPONS_ACTIVATED,
+)
 
 
-async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant, entry: ConfigEntry
-) -> dict[str, Any]:
-    """Return diagnostics data — token is redacted for safety."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-
+async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: LidlPlusConfigEntry) -> dict[str, Any]:
+    """Return diagnostics data without tokens, IDs and store locations."""
+    coordinator = entry.runtime_data
     data = coordinator.data or {}
+    receipts = data.get(KEY_RECEIPTS, [])
 
     return {
-        "config": {
-            "country": entry.data.get("country"),
-            "language": entry.data.get("language"),
-            "refresh_token": "**REDACTED**",
-        },
-        "coordinator_data": {
-            k: v
-            for k, v in data.items()
-            # Redact coupon list (may contain personal data), keep counts
-            if k not in ("coupons",)
-        },
+        "config": async_redact_data(dict(entry.data), TO_REDACT),
         "last_update_success": coordinator.last_update_success,
-        "last_exception": str(coordinator.last_exception) if coordinator.last_exception else None,
+        "last_exception": repr(coordinator.last_exception) if coordinator.last_exception else None,
+        "loyalty_id_error": coordinator.loyalty_error,
+        # Without the region the national leaflets are shown (the name of the region is left out, it is personal)
+        "leaflet_region_known": bool(data.get(KEY_LEAFLET_REGION)),
+        # The API key of BestTime.app is an option and never part of the diagnostics
+        "busy_times": {
+            "opening_hours_known": bool((data.get(KEY_BUSY_TIMES) or {}).get("opening_hours")),
+            "forecast": bool((data.get(KEY_BUSY_TIMES) or {}).get("forecast")),
+            "forecast_error": (data.get(KEY_BUSY_TIMES) or {}).get("forecast_error"),
+        },
+        # Without the persons, times and places of the visits
+        "shopping_duration": {
+            "persons": len((data.get(KEY_SHOPPING_DURATION) or {}).get("entities") or []),
+            "visits": (data.get(KEY_SHOPPING_DURATION) or {}).get("visits"),
+            "store_location_known": bool((data.get(KEY_SHOPPING_DURATION) or {}).get("store")),
+            "store_zone": bool(((data.get(KEY_SHOPPING_DURATION) or {}).get("store") or {}).get("zones")),
+            "receipts_with_visit": sum(1 for receipt in receipts if receipt.get("visit")),
+        },
+        "summary": {key: data.get(key) for key in _SUMMARY_KEYS},
+        "counts": {
+            "receipts": len(receipts),
+            "receipts_without_items": sum(1 for receipt in receipts if not receipt.get("items")),
+            "products": len(data.get(KEY_PRODUCTS, [])),
+            "stores": len(data.get(KEY_SPENDING_BY_STORE, {})),
+            "coupons": len(data.get(KEY_COUPONS, [])),
+            "offer_stores": len(data.get(KEY_OFFER_STORES, [])),
+            "offers": len(data.get(KEY_OFFERS, [])),
+            "leaflets": len(data.get(KEY_LEAFLETS, [])),
+            "leaflets_without_products": sum(1 for leaflet in data.get(KEY_LEAFLETS, []) if not leaflet["products"]),
+            "articles": len(data.get(KEY_CATALOG) or {}),
+        },
+        # A few receipts (without receipt ID and store) help to debug the parsing of the receipt HTML
+        "latest_receipts": [
+            {"date": receipt.get("date"), "total": receipt.get("total"), "items": receipt.get("items", [])}
+            for receipt in receipts[:3]
+        ],
+        "latest_visits": [(receipt.get("visit") or {}).get("status") for receipt in receipts[:10]],
+        "log": data.get(KEY_LOG, []),
     }

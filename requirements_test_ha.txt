@@ -1,0 +1,2 @@
+# Tests of the Home Assistant integration (tests/ha), needs the Python version of current Home Assistant
+pytest-homeassistant-custom-component

@@ -1,0 +1,25 @@
+sync:
+activate_all_coupons:
+export:
+  fields:
+    dataset:
+      default: all
+      selector:
+        select:
+          translation_key: dataset
+          options:
+            - all
+            - receipts
+            - items
+            - products
+            - offers
+            - leaflets
+            - articles
+    format:
+      default: csv
+      selector:
+        select:
+          translation_key: format
+          options:
+            - csv
+            - json

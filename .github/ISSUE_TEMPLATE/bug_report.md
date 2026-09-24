@@ -22,3 +22,8 @@ _For auth problems_:
  - Browser: [e.g. Chrome, Firefox]
  - Country: [e.g. de, nl]
  - Language: [e.g. DE, NL]
+
+_For the Home Assistant integration_:
+ - Home Assistant version: [e.g. 2026.9.3]
+ - Integration version: [e.g. 1.2.0]
+ - Diagnostics: Settings → Devices & Services → Lidl Plus → ⋮ → Download diagnostics (tokens, loyalty ID and stores are removed)
