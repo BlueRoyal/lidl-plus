@@ -93,10 +93,16 @@ window.eval(code);
   assert.deepStrictEqual([posted.at(-1).msg.type, posted.at(-1).msg.id, posted.at(-1).msg.result.entry_id], ["lidl-plus:result", 7, "e1"]);
   const callCount = calls.length;
   fromPage({ type: "lidl-plus:call", id: 8, request: { type: "config/auth/delete", user_id: "u1" } });
+  fromPage({ type: "lidl-plus:call", id: 8, request: { type: "lidl_plus_other/x" } });
+  fromPage({ type: "lidl-plus:call", id: 8, request: { type: ["lidl_plus/articles"] } });
   fromPage({ type: "lidl-plus:call", id: 9 });
   await tick();
   assert.strictEqual(calls.length, callCount, "other commands are not sent to Home Assistant");
   assert.deepStrictEqual(posted.slice(-2).map((p) => [p.msg.id, p.msg.error]), [[8, "Unknown command"], [9, "Unknown command"]]);
+  // Commands of the integration that a newer page may send
+  fromPage({ type: "lidl-plus:call", id: 22, request: { type: "lidl_plus/a_later_command" } });
+  await tick();
+  assert.strictEqual(calls.at(-1).type, "lidl_plus/a_later_command");
   fromPage({ type: "lidl-plus:call", id: 10, request: { type: "lidl_plus/search", query: "x", entry_id: "broken" } });
   await tick();
   assert.deepStrictEqual([posted.at(-1).msg.id, posted.at(-1).msg.error], [10, "Connection lost"]);

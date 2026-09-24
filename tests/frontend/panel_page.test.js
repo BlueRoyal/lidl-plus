@@ -6,16 +6,17 @@ const assert = require("assert");
 const { JSDOM } = require("jsdom");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "..", "custom_components", "lidl_plus", "frontend", "index.html"), "utf8");
+const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "custom_components", "lidl_plus", "manifest.json"), "utf8")).version;
 const ORIGIN = "http://homeassistant.local:8123";
 const json = (value) => JSON.stringify(value);
 
-function openPage({ withChart = true } = {}) {
+function openPage({ withChart = true, version = VERSION } = {}) {
   const parentMessages = [];
   const charts = [];
   const configs = [];
   const errors = [];
   const dom = new JSDOM(html, {
-    url: `${ORIGIN}/lidl_plus_frontend/index.html?v=1.2.0`,
+    url: `${ORIGIN}/lidl_plus_frontend/index.html?v=${version}`,
     runScripts: "dangerously",
     beforeParse(window) {
       // The vendor scripts are not loaded by jsdom, a stub records the charts
@@ -162,6 +163,38 @@ const data = {
 
   assert.deepStrictEqual(errors, []);
   window.close(); // stops the refresh interval of the page
+}
+
+// ── After an update: the version of the page is the one of the integration ───
+assert.ok(html.includes(`const PAGE_VERSION = '${VERSION}';`), "PAGE_VERSION of index.html is the version of manifest.json");
+{
+  // Home Assistant still has the panel element of an older version loaded
+  const { window, document, parentMessages } = openPage({ version: "1.2.0" });
+  const banner = document.getElementById("reloadBanner");
+  assert.ok(!banner.classList.contains("hidden"));
+  assert.ok(banner.textContent.includes("Strg+F5"));
+  // The old element knows no scanner: the page does not wait for it
+  const before = parentMessages.length;
+  window.openScanner();
+  assert.strictEqual(parentMessages.length, before);
+  assert.ok(document.getElementById("scanHint").textContent.includes("einmal neu geladen"));
+  window.close();
+}
+{
+  // The same version: no hint, until a command is unknown
+  const { window, document, parentMessages, send } = openPage();
+  const banner = document.getElementById("reloadBanner");
+  assert.ok(banner.classList.contains("hidden"));
+  send({ type: "lidl-plus:data", data });
+  window.searchAll();
+  document.getElementById("globalSearch").value = "kaffee";
+  window.searchAll();
+  const call = parentMessages[parentMessages.length - 1].msg;
+  send({ type: "lidl-plus:result", id: call.id, error: "Unknown command" });
+  setTimeout(() => {
+    assert.ok(!banner.classList.contains("hidden"), "an unknown command shows the hint");
+    window.close();
+  }, 0);
 }
 
 // ── Chart.js missing: receipts and products are still shown ──────────────────

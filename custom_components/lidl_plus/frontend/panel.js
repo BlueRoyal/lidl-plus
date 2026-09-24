@@ -22,22 +22,11 @@
 const HOST_OFFSET = "--lidl-panel-host-offset";
 const PAGE_URL = new URL("index.html", import.meta.url);
 PAGE_URL.search = new URL(import.meta.url).search; // keep the ?v= cache buster
-// Websocket commands the page may send besides panel_data
-const PAGE_COMMANDS = new Set([
-  "lidl_plus/leaflet",
-  "lidl_plus/search",
-  // Article database: search, details, changes, barcodes and photos
-  "lidl_plus/articles",
-  "lidl_plus/article",
-  "lidl_plus/article_save",
-  "lidl_plus/article_delete",
-  "lidl_plus/barcode",
-  "lidl_plus/article_image",
-  "lidl_plus/article_image_delete",
-  "lidl_plus/article_leaflet",
-  // A zone around the store for the shopping duration, Home Assistant allows this to administrators only
-  "zone/create",
-]);
+// Websocket commands the page may send: every command of the integration, so an element that is still loaded after
+// an update passes on the commands of the newer page as well, and the zone around the store for the shopping
+// duration (Home Assistant allows this to administrators only)
+const PAGE_COMMAND_PREFIX = "lidl_plus/";
+const OTHER_PAGE_COMMANDS = new Set(["zone/create"]);
 const EXPORT_PATH = "/api/lidl_plus/export";
 // Messages of the Home Assistant app that end a scan of its barcode scanner
 const SCAN_RESULT = "bar_code/scan_result";
@@ -179,7 +168,8 @@ class LidlPlusPanel extends HTMLElement {
   }
 
   _call(request) {
-    if (!request || !PAGE_COMMANDS.has(request.type)) throw new Error("Unknown command");
+    const type = request && typeof request.type === "string" ? request.type : "";
+    if (!type.startsWith(PAGE_COMMAND_PREFIX) && !OTHER_PAGE_COMMANDS.has(type)) throw new Error("Unknown command");
     return this._hass.callWS(request);
   }
 

@@ -82,6 +82,11 @@
 <!-- Fehler beim Laden bzw. bei der letzten Synchronisierung -->
 <div id="errorBanner" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-2xl px-4 py-3 mb-4"></div>
 <div id="syncWarning" class="hidden bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl px-4 py-3 mb-4"></div>
+<!-- After an update Home Assistant may still have the panel element of the older version loaded -->
+<div id="reloadBanner" class="hidden bg-blue-50 border border-blue-200 text-[#003882] rounded-2xl px-4 py-3 mb-4">
+  🔄 Die Lidl-Plus-Integration wurde aktualisiert, Home Assistant hat aber noch die alte Version des Panels geladen.
+  Bitte lade Home Assistant einmal neu: im Browser mit Strg+F5, in der Handy-App die App ganz schließen und neu öffnen.
+</div>
 
 <!-- ══════════════════════════════════════════════════════════════════════════
      TAB: ÜBERSICHT
@@ -424,6 +429,9 @@ let chartMonthly, chartCategory, chartStores, chartModal;
 let callCounter = 0, leafletRequest = 0, searchRequest = 0;
 const pendingCalls = new Map();
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+// Version of this page. The panel element opens it with its own version (?v=), they differ when Home Assistant still
+// has the element of an older version loaded after an update: then new commands of the page may be unknown to it
+const PAGE_VERSION = '1.3.1';
 const CALL_TIMEOUT_MS = 60 * 1000;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -518,8 +526,20 @@ function settleCall(msg) {
   if (!pending) return;
   pendingCalls.delete(msg.id);
   clearTimeout(pending.timer);
+  // Unknown to an older panel element (or to Home Assistant before its restart after an update)
+  if (msg.error && /^Unknown command\.?$/.test(msg.error)) showReloadHint();
   if (msg.error) pending.reject(new Error(msg.error));
   else pending.resolve(msg.result);
+}
+
+function showReloadHint() {
+  document.getElementById('reloadBanner').classList.remove('hidden');
+}
+
+// True if the panel element that opened this page belongs to another version
+function outdatedPanel() {
+  const loaded = new URLSearchParams(location.search).get('v');
+  return Boolean(loaded) && loaded !== PAGE_VERSION;
 }
 
 // Websocket command of the integration for the account shown
@@ -1640,6 +1660,13 @@ async function openScanner(forArticle = false) {
   document.getElementById('scanInput').value = '';
   document.getElementById('scanHint').textContent = '';
   document.getElementById('scanModal').classList.add('open');
+  // An older panel element knows no scanner and would never answer
+  if (outdatedPanel()) {
+    document.getElementById('scanHint').textContent =
+      'Der Scanner der App öffnet sich erst, wenn du Home Assistant einmal neu geladen hast (siehe Hinweis oben). Bis dahin kannst du den Barcode eintippen.';
+    document.getElementById('scanInput').focus();
+    return;
+  }
   // 1. The barcode scanner of the Home Assistant app
   let result;
   try {
@@ -2527,6 +2554,7 @@ document.getElementById('busyDays').addEventListener('click', event => {
 if (window.parent === window) {
   showError('Diese Seite funktioniert nur als Home-Assistant-Panel (Seitenleiste → Lidl Plus).');
 } else {
+  if (outdatedPanel()) showReloadHint();
   requestData();
   setInterval(requestData, REFRESH_INTERVAL_MS);
 }

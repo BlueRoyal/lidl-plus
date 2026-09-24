@@ -6,6 +6,7 @@ const assert = require("assert");
 const { JSDOM } = require("jsdom");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "..", "custom_components", "lidl_plus", "frontend", "index.html"), "utf8");
+const VERSION = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "custom_components", "lidl_plus", "manifest.json"), "utf8")).version;
 const ORIGIN = "http://homeassistant.local:8123";
 const json = (value) => JSON.stringify(value);
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -15,7 +16,7 @@ function openPage() {
   const parentMessages = [];
   const errors = [];
   const dom = new JSDOM(html, {
-    url: `${ORIGIN}/lidl_plus_frontend/index.html?v=1.3.0`,
+    url: `${ORIGIN}/lidl_plus_frontend/index.html?v=${VERSION}`,
     runScripts: "dangerously",
     pretendToBeVisual: true,
     beforeParse(window) {
@@ -549,6 +550,7 @@ const product = {
   send({ type: "lidl-plus:data", data: { ...data, version: "v5" } });
   assert.strictEqual(parentMessages.filter((entry) => entry.msg.request && entry.msg.request.type === "lidl_plus/articles").length, loads + 1);
 
+  assert.ok(document.getElementById("reloadBanner").classList.contains("hidden"), "panel element and page of one version");
   assert.deepStrictEqual(errors, []);
   window.close();
   console.log("article database runtime test passed");

@@ -386,6 +386,9 @@ cd tests/frontend && npm ci && npm test # the sidebar panel (panel.js and index.
 
 ## Changelog
 
+### 1.3.1 — Home Assistant integration (2026-09-24)
+- After an update Home Assistant may still have the panel element of the older version loaded, which rejected the new commands of the article database with "Unknown command". The panel element passes on every command of the integration now, and the page asks to reload Home Assistant if it belongs to an older panel element
+
 ### 1.3.0 — Home Assistant integration (2026-09-24)
 - Article database in the tab *Artikel*: every article bought, offered or shown in a leaflet, with search and filters (bought, offers, leaflets, own articles, with nutrition values, photos, barcode, …); details added by hand: barcodes, package size, nutrition values per 100 g/ml, ingredients (also for non-food), notes and photos (made smaller before they are sent); articles added by hand
 - Barcode scanner: the scanner of the Home Assistant app, the camera in the browser or typing the barcode; a known barcode opens its article, for an unknown one you search the article it belongs to or add a new one, with the values of Open Food Facts, Open Beauty Facts or Open Products Facts
